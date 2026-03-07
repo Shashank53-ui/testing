@@ -719,11 +719,11 @@ async function syncAll() {
     const specificIds = idIndex !== -1 ? args[idIndex + 1].split(',').map(id => parseInt(id.trim())) : null;
 
     let queryArgs: any[] = [];
-    let queryText = 'SELECT id, trading_name, ats_provider, ats_board_token FROM companies ORDER BY trading_name';
+    let queryText = 'SELECT id, trading_name, ats_provider, ats_board_token FROM public.companies ORDER BY trading_name';
 
     if (specificIds && specificIds.length > 0) {
         const placeholders = specificIds.map((_, i) => `$${i + 1}`).join(',');
-        queryText = `SELECT id, trading_name, ats_provider, ats_board_token FROM companies WHERE id IN (${placeholders}) ORDER BY trading_name`;
+        queryText = `SELECT id, trading_name, ats_provider, ats_board_token FROM public.companies WHERE id IN (${placeholders}) ORDER BY trading_name`;
         queryArgs = specificIds;
         console.log(`Filtering for ${specificIds.length} specific IDs: ${specificIds.join(', ')}`);
     }
@@ -744,6 +744,11 @@ async function syncAll() {
 
     for (const company of companies) {
         const { id, trading_name, ats_provider, ats_board_token } = company;
+
+        if (!ats_provider || !ats_board_token) {
+            console.log(`[SKIP] ${trading_name} — no ATS provider or token configured`);
+            continue;
+        }
 
         const fetcher = FETCHERS[ats_provider];
         if (!fetcher) {
@@ -789,7 +794,7 @@ async function syncAll() {
                     await pool.query('BEGIN');
 
                     const upsertQuery = `
-                        INSERT INTO jobs (company_id, title, location, url, department, level, updated_at)
+                        INSERT INTO public.jobs (company_id, title, location, url, department, level, updated_at)
                         VALUES ($1, $2, $3, $4, $5, $6, NOW())
                         ON CONFLICT (url) DO UPDATE SET
                             title = EXCLUDED.title,
@@ -818,7 +823,7 @@ async function syncAll() {
 
             // Always update active_jobs_count (even if 0 — keeps data fresh)
             try {
-                await pool.query('UPDATE companies SET active_jobs_count = $1 WHERE id = $2', [ukJobs.length, id]);
+                await pool.query('UPDATE public.companies SET active_jobs_count = $1 WHERE id = $2', [ukJobs.length, id]);
             } catch (updateErr) {
                 // Ignore silent errors for individual counts
             }
