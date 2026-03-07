@@ -61,7 +61,7 @@ function isUKLocation(loc: any): boolean {
     // Explicit exclusions for known false positives
     if (l.includes('ukraine')) return false;
     // Use regex word boundaries (\b) to ensure we match whole words, not substrings
-    const ukRegex = /\b(uk|united kingdom|gb|england|scotland|wales|london|manchester|birmingham|edinburgh|bristol|cambridge|oxford|glasgow|leeds|sheffield|newcastle|cardiff|liverpool|nottingham|reading|brighton|southampton|belfast|coventry|northampton|milton keynes|remote - uk|uk remote|richmond|halifax|sunderland|leicester|chester|basingstoke|knutsford|canary wharf|radbroke|gloucester|solihull|warwick|bromley|southend|hove|purley|gildersome|portishead|pendeford|barnwood|united kingdom)\b/;
+    const ukRegex = /\b(uk|uki|uk&i|united kingdom|gb|england|scotland|wales|london|manchester|birmingham|edinburgh|bristol|cambridge|oxford|glasgow|leeds|sheffield|newcastle|cardiff|liverpool|nottingham|reading|brighton|southampton|belfast|coventry|northampton|milton keynes|remote - uk|uk remote|richmond|halifax|sunderland|leicester|chester|basingstoke|knutsford|canary wharf|radbroke|gloucester|solihull|warwick|bromley|southend|hove|purley|gildersome|portishead|pendeford|barnwood|united kingdom)\b/;
 
     // Allow "X Locations" if it's potentially UK (will be refined later or trusted by filter)
     const isMulti = /\d+ locations/i.test(l);
