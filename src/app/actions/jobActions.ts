@@ -1,6 +1,7 @@
 'use server';
 
 import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/server';
 
 export interface Job {
     id: string;
@@ -8,13 +9,18 @@ export interface Job {
     url: string;
     location: string;
     department?: string;
+    level?: string | null;
     created_at: string;
     company_id: number;
     company?: {
         trading_name: string;
         companies_house_name: string | null;
+        url: string | null;
+        url_linkedin: string | null;
         url_favicon: string | null;
+        description: string | null;
         licensed_sponsor: boolean;
+        active_jobs_count: number;
     };
 }
 
@@ -28,7 +34,7 @@ export async function getJobs(params: {
     excludedJobIds?: string[];
     excludedCompanyIds?: number[];
     company_id?: number;
-}) {
+} = {}) {
     const PAGE_SIZE = 5;
     const page = params.page || 1;
     const from = (page - 1) * PAGE_SIZE;
@@ -36,7 +42,7 @@ export async function getJobs(params: {
 
     let query = supabase
         .from('jobs')
-        .select('*, company:companies!inner(*)', { count: 'exact' });
+        .select('*, level, company:companies!inner(*)', { count: 'exact' });
 
     // 0. Exclusions for stability and diversity
     if (params.excludedJobIds && params.excludedJobIds.length > 0) {
@@ -203,4 +209,101 @@ export async function getJobs(params: {
     const totalPages = Math.ceil(total / PAGE_SIZE);
 
     return { jobs: finalJobs, totalPages };
+}
+
+export async function markJobAsApplied(jobId: string) {
+    const supabaseServer = await createClient();
+    const { data: { user } } = await supabaseServer.auth.getUser();
+    if (!user) {
+        throw new Error('You must be logged in to apply for jobs.');
+    }
+
+    try {
+        const { error } = await supabaseServer
+            .from('user_applied_jobs')
+            .insert({ user_id: user.id, job_id: Number(jobId) });
+
+        if (error) {
+            if (error.code === '23505') {
+                return { success: true, message: 'Already marked as applied' };
+            }
+            console.error('Error marking job as applied:', error);
+            return { success: false, error: 'Failed to mark job as applied.' };
+        }
+
+        return { success: true, message: 'Job marked as applied.' };
+    } catch (e) {
+        console.error('Exception marking job as applied:', e);
+        return { success: false, error: 'An unexpected error occurred.' };
+    }
+}
+
+export async function getAppliedJobs() {
+    const supabaseServer = await createClient();
+    const { data: { user } } = await supabaseServer.auth.getUser();
+    if (!user) {
+        return { success: false, error: 'Not logged in', jobs: [] };
+    }
+
+    try {
+        const { data, error } = await supabaseServer
+            .from('user_applied_jobs')
+            .select(`
+                id,
+                created_at,
+                job_id,
+                jobs:job_id (
+                    id,
+                    title,
+                    url,
+                    location,
+                    department,
+                    created_at,
+                    company_id,
+                    companies:company_id (
+                        trading_name,
+                        companies_house_name,
+                        url,
+                        url_linkedin,
+                        url_favicon,
+                        licensed_sponsor
+                    )
+                )
+            `)
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Map data to Job format
+        const formattedJobs = (data || []).map(record => {
+            const jobData = record.jobs as any;
+            if (!jobData) return null;
+
+            return {
+                id: jobData.id,
+                title: jobData.title,
+                url: jobData.url,
+                location: jobData.location,
+                department: jobData.department,
+                created_at: jobData.created_at,
+                company_id: jobData.company_id,
+                company: jobData.companies ? {
+                    trading_name: jobData.companies.trading_name,
+                    companies_house_name: jobData.companies.companies_house_name,
+                    url: jobData.companies.url,
+                    url_linkedin: jobData.companies.url_linkedin,
+                    url_favicon: jobData.companies.url_favicon,
+                    licensed_sponsor: jobData.companies.licensed_sponsor,
+                    active_jobs_count: 0 // Default fallback for UI
+                } : undefined,
+                applied_at: record.created_at
+            };
+        }).filter(Boolean);
+
+        return { success: true, jobs: formattedJobs };
+    } catch (error) {
+        console.error('Error fetching applied jobs:', error);
+        return { success: false, error: 'Failed to load applied jobs.', jobs: [] };
+    }
 }

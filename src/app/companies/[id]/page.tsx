@@ -54,13 +54,14 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
                         <div className="text-brand-600">
                             <Logo className="w-8 h-8" />
                         </div>
-                        <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-brand-600 to-purple-600 dark:from-brand-400 dark:to-purple-400">
+                        <span className="text-2xl font-bold text-slate-900 dark:text-white">
                             Getlanded
                         </span>
                     </Link>
                     <div className="flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
                         <Link href="/" className="hover:text-brand-600 transition-colors">Jobs</Link>
                         <Link href="/companies" className="hover:text-brand-600 transition-colors">Companies</Link>
+                        <Link href="/applied" className="hover:text-brand-600 transition-colors">Applied</Link>
                         <button className="bg-brand-600 hover:bg-brand-500 text-white px-5 py-2 rounded-full transition-colors shadow-sm font-medium">Sign in</button>
                     </div>
                 </div>

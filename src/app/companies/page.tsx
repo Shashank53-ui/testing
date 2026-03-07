@@ -1,8 +1,6 @@
-import { Building, Briefcase, Users } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { createClient } from '../../utils/supabase/server';
-import CompanySearchBar from './CompanySearchBar';
 import CompanyFeed from '../../components/companies/CompanyFeed';
 import { getCompanies } from '../../app/actions/companyActions';
 import Logo from '../../components/Logo';
@@ -12,19 +10,22 @@ export const dynamic = 'force-dynamic';
 export default async function CompaniesPage({
     searchParams,
 }: {
-    searchParams: Promise<{ page?: string; q?: string }>;
+    searchParams: Promise<{ page?: string; q?: string; sort?: string; view?: string }>;
 }) {
-    const { page: pageParam, q } = await searchParams;
+    const { page: pageParam, q, sort, view } = await searchParams;
     const query = (q || '').trim();
+    const currentSort = sort || 'alphabetical';
     const page = Math.max(1, parseInt(pageParam || '1'));
+    const isFavoritesView = view === 'favorites';
 
     const serverSupabase = await createClient();
     const { data: { user } } = await serverSupabase.auth.getUser();
 
-    // Fetch initial companies
     const { companies, totalPages } = await getCompanies({
         page,
         q: query,
+        sort: currentSort,
+        favoritesOnly: isFavoritesView
     });
 
     const companyList = companies || [];
@@ -38,16 +39,17 @@ export default async function CompaniesPage({
                         <div className="text-brand-600">
                             <Logo className="w-8 h-8" />
                         </div>
-                        <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-brand-600 to-purple-600 dark:from-brand-400 dark:to-purple-400">
+                        <span className="text-2xl font-bold text-slate-900 dark:text-white">
                             Getlanded
                         </span>
                     </Link>
                     <div className="flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
-                        <Link href="/" className="hover:text-brand-600 transition-colors">Jobs</Link>
-                        <Link href="/companies" className="text-brand-600 font-semibold">Companies</Link>
+                        <Link href="/jobs" className="hover:text-brand-600 transition-colors">Jobs</Link>
+                        <Link href="/companies" className="text-brand-600 font-semibold border-b-2 border-brand-600 pb-1">Companies</Link>
+                        <Link href="/applied" className="hover:text-brand-600 transition-colors">Applied</Link>
                         {user ? (
-                            <Link href="/preferences" className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 px-5 py-2 flex items-center gap-2 rounded-none transition-colors border border-[var(--border)] font-medium">
-                                My Account & Preferences
+                            <Link href="/account/profile" className="bg-slate-100 hover:bg-slate-200 text-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 px-5 py-2 flex items-center gap-2 rounded-none transition-colors border border-[var(--border)] font-medium">
+                                Account
                             </Link>
                         ) : (
                             <Link href="/login" className="bg-brand-600 hover:bg-brand-500 text-white px-5 py-2 rounded-none transition-colors shadow-sm font-medium">
@@ -58,35 +60,32 @@ export default async function CompaniesPage({
                 </div>
             </nav>
 
-            {/* Hero Section */}
-            <main className="pt-28 pb-16 px-4 max-w-7xl mx-auto">
-                <div className="text-center py-12 lg:py-16">
-                    <h1 className="text-4xl lg:text-6xl font-extrabold tracking-tight mb-6">
-                        UK Visa <span className="text-gradient">Sponsors</span>
-                    </h1>
-                    <p className="text-xl text-slate-500 dark:text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-                        Explore verified companies currently sponsoring UK visas. Discover open roles and apply directly to employers.
-                    </p>
-
-                    {/* Search Bar */}
-                    <Suspense fallback={null}>
-                        <CompanySearchBar initialQuery={query} />
-                    </Suspense>
+            {/* Full-height 3-column layout — exactly below fixed nav */}
+            <main className="mt-16 flex h-[calc(100vh-4rem)] overflow-hidden">
+                {/* Left Sidebar */}
+                <div className="hidden lg:flex flex-col w-48 border-r border-[var(--border)] bg-[var(--background)] shrink-0 p-3 gap-1 pt-4">
+                    <Link
+                        href="/companies"
+                        className={`w-full text-left px-3 py-2 text-sm rounded-md flex items-center gap-2.5 transition-colors ${!isFavoritesView ? 'bg-slate-100 font-semibold text-slate-900' : 'text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        <span className="text-base text-slate-600">🏢</span>
+                        <span>All</span>
+                    </Link>
+                    <Link
+                        href="/companies?view=favorites"
+                        className={`w-full text-left px-3 py-2 text-sm rounded-md flex items-center gap-2.5 transition-colors ${isFavoritesView ? 'bg-slate-100 font-semibold text-slate-900' : 'text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        <span className="text-base text-brand-600">⭐</span>
+                        <span>Favorites</span>
+                    </Link>
                 </div>
 
-                {/* Company Feed Wrapper */}
-                <div className="mt-4">
-                    <div className="flex items-center justify-between mb-6 border-b border-[var(--border)] pb-4">
-                        <h2 className="text-xl font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                            <Building className="w-5 h-5 text-brand-500" />
-                            {query ? `Search Results for "${query}"` : 'Top Sponsoring Companies'}
-                        </h2>
-                    </div>
-
+                {/* Middle + Right: Feed — fills remaining space, overflow handled inside */}
+                <div className="flex-1 min-w-0 h-full overflow-hidden flex flex-col">
                     <CompanyFeed
                         initialCompanies={companyList as any}
                         initialTotalPages={totalPages}
-                        searchParams={{ q: query }}
+                        searchParams={{ q: query, sort: currentSort, view }}
                     />
                 </div>
             </main>

@@ -23,6 +23,7 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 import * as cheerio from 'cheerio';
+import { inferJobLevel } from '../lib/inferJobLevel';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
@@ -359,7 +360,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
     // Wells Fargo uses myworkdaysite.com. Willis Re uses standard myworkdayjobs.com.
     const isWorkdaySite = slug === 'wf' || slug.includes('hcahealthcare');
 
-    for (const wd of ['wd3', 'wd1', 'wd5', 'wd107', 'wd108', 'wd12', 'wd2']) {
+    for (const wd of ['wd3', 'wd1', 'wd5', 'wd103', 'wd107', 'wd108', 'wd12', 'wd2']) {
         // Try both slug.wd.domain and wd.domain
         const domains = isWorkdaySite
             ? [`${slug}.${wd}.myworkdaysite.com`, `${wd}.myworkdaysite.com`]
@@ -752,7 +753,8 @@ async function syncAll() {
                         title: safeStr(j.title),
                         location: safeStr(j.location),
                         url: safeStr(j.url),
-                        department: j.department ? safeStr(j.department) : null
+                        department: j.department ? safeStr(j.department) : null,
+                        level: inferJobLevel(safeStr(j.title))
                     }));
 
                 const { error: jobErr } = await supabase

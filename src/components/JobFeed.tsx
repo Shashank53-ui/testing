@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { Database, Briefcase, MapPin, Building, ChevronRight } from 'lucide-react';
-import { getJobs, Job } from '../app/actions/jobActions';
+import { useState, useEffect } from 'react';
+import { Database, Briefcase, MapPin, Building, ChevronRight, Check, CheckCircle2, Link as LinkIcon, Linkedin, FileText, ArrowRight } from 'lucide-react';
+import { getJobs, Job, markJobAsApplied } from '../app/actions/jobActions';
 
 interface JobFeedProps {
     initialJobs: Job[];
     initialTotalPages: number;
+    initialAppliedJobs?: Record<string, string>;
+    isGuest?: boolean;
     searchParams: {
         q?: string;
         loc?: string;
@@ -26,16 +28,35 @@ function fixJobUrl(url: string): string {
     return url;
 }
 
-export default function JobFeed({ initialJobs, initialTotalPages, searchParams }: JobFeedProps) {
-    const [jobs, setJobs] = useState<Job[]>(initialJobs);
+export default function JobFeed({ initialJobs, initialTotalPages, initialAppliedJobs = {}, isGuest = false, searchParams }: JobFeedProps) {
+    const GUEST_LIMIT = 2;
+    const displayedInitialJobs = isGuest ? initialJobs.slice(0, GUEST_LIMIT) : initialJobs;
+
+    const [jobs, setJobs] = useState<Job[]>(displayedInitialJobs);
     const [page, setPage] = useState(1);
     const [isFetching, setIsFetching] = useState(false);
 
+    const [selectedJobId, setSelectedJobId] = useState<string | null>(displayedInitialJobs.length > 0 ? displayedInitialJobs[0].id : null);
+
     // Track seen IDs to avoid duplicates and ensure diversity across "Load More"
-    const [seenJobIds, setSeenJobIds] = useState<string[]>(initialJobs.map(j => j.id));
-    const [seenCompanyIds, setSeenCompanyIds] = useState<number[]>(initialJobs.map(j => j.company_id));
+    const [seenJobIds, setSeenJobIds] = useState<string[]>(displayedInitialJobs.map(j => j.id));
+    const [seenCompanyIds, setSeenCompanyIds] = useState<number[]>(displayedInitialJobs.map(j => j.company_id));
+    // appliedJobIds: map of jobId -> applied timestamp (or true)
+    const [appliedJobIds, setAppliedJobIds] = useState<Map<string, string>>(() => {
+        const m = new Map<string, string>();
+        Object.entries(initialAppliedJobs).forEach(([id, ts]) => m.set(id, ts));
+        return m;
+    });
 
     const totalPages = initialTotalPages;
+
+    useEffect(() => {
+        if (!selectedJobId && jobs.length > 0) {
+            setSelectedJobId(jobs[0].id);
+        }
+    }, [jobs, selectedJobId]);
+
+    const selectedJob = jobs.find(j => j.id === selectedJobId);
 
     const loadMore = async () => {
         setIsFetching(true);
@@ -66,6 +87,29 @@ export default function JobFeed({ initialJobs, initialTotalPages, searchParams }
         }
     };
 
+    const handleApplyClick = async (e: React.MouseEvent, jobId: string) => {
+        e.stopPropagation(); // prevent card selection
+        if (appliedJobIds.has(jobId)) return;
+
+        const appliedAt = new Date().toISOString();
+        setAppliedJobIds(prev => {
+            const newMap = new Map(prev);
+            newMap.set(jobId, appliedAt);
+            return newMap;
+        });
+
+        const res = await markJobAsApplied(jobId);
+        if (!res.success) {
+            // Revert on failure
+            setAppliedJobIds(prev => {
+                const newMap = new Map(prev);
+                newMap.delete(jobId);
+                return newMap;
+            });
+            alert(res.error || 'Failed to mark as applied');
+        }
+    };
+
     if (jobs.length === 0) {
         return (
             <div className="text-center py-20 bg-[var(--card)] rounded-none border border-dashed border-[var(--border)]">
@@ -77,81 +121,193 @@ export default function JobFeed({ initialJobs, initialTotalPages, searchParams }
     }
 
     return (
-        <div className="space-y-4">
-            {jobs.map((job) => (
-                <a
-                    key={job.id}
-                    href={fixJobUrl(job.url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block bg-[var(--card)] border border-[var(--border)] p-6 rounded-none hover-card-lift relative overflow-hidden group"
-                >
-                    <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-none border border-[var(--border)] overflow-hidden bg-slate-50 flex items-center justify-center shrink-0">
-                            {job.company?.url_favicon ? (
-                                <img src={job.company.url_favicon} alt="logo" className="w-8 h-8 object-contain" />
-                            ) : (
-                                <Building className="w-6 h-6 text-slate-400" />
-                            )}
-                        </div>
+        <div className="flex flex-col lg:flex-row gap-6 relative items-start lg:h-[calc(100vh-8rem)]">
 
-                        <div className="flex-1">
-                            <h3 className="font-semibold text-lg text-slate-900 dark:text-white group-hover:text-brand-600 transition-colors">
+            {/* Middle Column: Job List — scrolls independently */}
+            <div className="w-full lg:w-[55%] lg:h-full lg:overflow-y-auto space-y-4 pb-8 pr-1">
+                {jobs.map((job) => {
+                    const isSelected = selectedJobId === job.id;
+                    const isNew = job.created_at
+                        ? (Date.now() - new Date(job.created_at).getTime()) < 48 * 60 * 60 * 1000
+                        : false;
+                    return (
+                        <div
+                            key={job.id}
+                            onClick={() => setSelectedJobId(job.id)}
+                            className={`block bg-white border p-5 rounded-md cursor-pointer transition-all ${isSelected ? 'border-brand-500 shadow-sm' : 'border-[var(--border)] hover:border-slate-300'}`}
+                        >
+                            <div className="flex items-center justify-between mb-3 border-b border-transparent">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-md border border-[var(--border)] overflow-hidden bg-white flex items-center justify-center shrink-0">
+                                        {job.company?.url_favicon ? (
+                                            <img src={job.company.url_favicon} alt="logo" className="w-4 h-4 object-contain" />
+                                        ) : (
+                                            <Building className="w-4 h-4 text-slate-400" />
+                                        )}
+                                    </div>
+                                    <span className="font-semibold text-sm text-slate-700">{job.company?.trading_name}</span>
+                                </div>
+                                <span className="text-xs text-slate-400 font-medium">
+                                    {job.created_at ? new Date(job.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}
+                                </span>
+                            </div>
+
+                            <h3 className="font-bold text-[17px] text-slate-900 mb-1.5 leading-snug">
+                                {isNew && <span className="bg-[#EFFFCC] text-[#4d5c0f] text-[10px] font-bold px-1.5 py-0.5 rounded-[3px] mr-2 align-middle uppercase tracking-widest border border-[#d6f09e]">NEW</span>}
                                 {job.title}
                             </h3>
-                            <p className="text-slate-500 text-sm mt-1">{job.company?.companies_house_name || job.company?.trading_name || 'Verified Sponsor'}</p>
 
-                            <div className="flex items-center gap-4 mt-4 flex-wrap">
-                                <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 dark:bg-slate-800 dark:text-slate-300 px-2.5 py-1 rounded-md font-medium">
-                                    <MapPin className="w-3.5 h-3.5" />
-                                    {job.location}
-                                </div>
+                            <div className="flex items-center gap-2 text-[13px] text-slate-500 mb-4 font-medium">
+                                <span>{job.department || 'General'}</span>
+                                <span>•</span>
+                                <span>{job.location || 'UK'}</span>
+                            </div>
 
-                                {job.department && (
-                                    <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 dark:bg-slate-800 dark:text-slate-300 px-2.5 py-1 rounded-md font-medium">
-                                        <Briefcase className="w-3.5 h-3.5" />
-                                        {job.department}
-                                    </div>
+                            <div className="flex items-center flex-wrap gap-2 mb-4">
+                                {job.level && (
+                                    <span className="text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{job.level}</span>
                                 )}
-
                                 {job.company?.licensed_sponsor && (
-                                    <div className="flex items-center gap-1.5 text-xs text-brand-700 bg-brand-50 dark:bg-brand-900/30 dark:text-brand-300 px-2.5 py-1 rounded-md font-medium border border-brand-200 dark:border-brand-800">
-                                        Verified Sponsor
+                                    <div className="flex items-center gap-1.5 text-xs text-white bg-[#137cdb] px-2.5 py-1 rounded-full font-medium shadow-sm">
+                                        <Briefcase className="w-3 h-3" /> Licensed sponsor
                                     </div>
                                 )}
                             </div>
-                        </div>
 
-                        <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <div className="bg-brand-50 text-brand-600 p-2 rounded-full">
-                                <ChevronRight className="w-5 h-5" />
+                            <div className="flex items-center justify-between pt-3 border-t border-[var(--border)] mt-2">
+                                <button className="text-[13px] text-slate-500 hover:text-slate-800 font-medium transition-colors">Show less like this</button>
+                                <div className="flex items-center gap-2">
+                                    <button className="text-[13px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-sm transition-colors">Report job as expired</button>
+                                    <button
+                                        onClick={(e) => handleApplyClick(e, job.id)}
+                                        disabled={appliedJobIds.has(job.id) || isGuest}
+                                        className={`text-[13px] font-medium px-3 py-1.5 rounded-sm shadow-sm transition-colors flex items-center gap-1.5
+                                            ${appliedJobIds.has(job.id)
+                                                ? 'bg-emerald-100 text-emerald-800 cursor-default shadow-none border border-emerald-200'
+                                                : isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                    : 'text-white bg-[#103E39] hover:bg-[#0a2e2a]'}`}
+                                    >
+                                        {appliedJobIds.has(job.id) ? (
+                                            <><Check className="w-3.5 h-3.5" /> Applied {appliedJobIds.get(job.id) ? `· ${new Date(appliedJobIds.get(job.id)!).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}</>
+                                        ) : 'Mark as applied'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+
+                {/* Guest CTA / Load More */}
+                {isGuest ? (
+                    <div className="mt-4">
+                        {/* CTA Card — same size & shape as a job card */}
+                        <div className="bg-white border border-[var(--border)] rounded-md p-5 shadow-sm">
+                            <div className="flex flex-col items-center text-center py-2">
+                                <p className="text-4xl font-extrabold text-[#137cdb] mb-1">20,000+</p>
+                                <h3 className="text-lg font-bold text-slate-900 mb-1">UK jobs that can actually sponsor your visa</h3>
+                                <p className="text-sm text-slate-500 mb-5 leading-relaxed max-w-xs">
+                                    Stop guessing. Every job here is at a verified UK visa sponsor — filtered for you, updated daily.
+                                </p>
+                                <div className="flex items-center gap-3 w-full max-w-xs">
+                                    <a href="/signup" className="flex-1 bg-[#103E39] hover:bg-[#0a2e2a] text-white font-semibold py-2.5 rounded-sm text-sm text-center transition-colors">Get started free</a>
+                                    <a href="/login" className="flex-1 border border-[var(--border)] text-slate-700 hover:bg-slate-50 font-medium py-2.5 rounded-sm text-sm text-center transition-colors">Sign in</a>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </a>
-            ))}
+                ) : page < totalPages && (
+                    <div className="flex items-center justify-center pt-8">
+                        <button
+                            onClick={loadMore}
+                            disabled={isFetching}
+                            className="inline-flex items-center justify-center px-8 py-3 bg-[var(--card)] border border-[var(--border)] hover:border-brand-400 text-brand-600 font-semibold transition-all hover-card-lift min-w-[200px] disabled:opacity-70 disabled:cursor-not-allowed rounded-md"
+                        >
+                            {isFetching ? (
+                                <span className="flex items-center gap-2">
+                                    <span className="animate-pulse">Fetching...</span>
+                                </span>
+                            ) : (
+                                <>
+                                    Load More Jobs
+                                    <ChevronRight className="w-4 h-4 ml-2" />
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
+            </div>
 
-            {/* Load More Button */}
-            {page < totalPages && (
-                <div className="flex items-center justify-center pt-8">
-                    <button
-                        onClick={loadMore}
-                        disabled={isFetching}
-                        className="inline-flex items-center justify-center px-8 py-3 bg-[var(--card)] border border-[var(--border)] hover:border-brand-400 text-brand-600 font-semibold transition-all hover-card-lift min-w-[200px] disabled:opacity-70 disabled:cursor-not-allowed"
-                    >
-                        {isFetching ? (
-                            <span className="flex items-center gap-2">
-                                <span className="animate-pulse">Fetching...</span>
-                            </span>
-                        ) : (
-                            <>
-                                Load More Jobs
-                                <ChevronRight className="w-4 h-4 ml-2" />
-                            </>
-                        )}
-                    </button>
+            {/* Right Column: Job Details Panel — stays fixed, no scroll */}
+            <div className="hidden lg:block lg:w-[45%] lg:h-full">
+                <div className="bg-white border border-[var(--border)] rounded-md shadow-sm overflow-hidden flex flex-col h-full">
+                    {!selectedJob ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-50">
+                            <Briefcase className="w-16 h-16 text-slate-300 mb-4" />
+                            <h3 className="text-xl font-medium text-slate-800 dark:text-slate-200">Select a job</h3>
+                            <p className="text-sm text-slate-500 mt-2">Click on a job from the list to view its details</p>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col h-full overflow-hidden">
+                            <div className="p-7 overflow-y-auto flex-1">
+
+                                <h1 className="text-2xl font-extrabold text-slate-900 mb-1 leading-tight">{selectedJob.title}</h1>
+                                <p className="text-slate-500 mb-6 font-medium text-[15px]">{selectedJob.department || 'Engineering'} ({selectedJob.location || 'UK'})</p>
+
+                                {/* Checklist Area */}
+                                <div className="bg-[#137cdb] text-white p-5 rounded-md space-y-3.5 mb-8 shadow-sm">
+                                    <div className="flex items-start gap-3 text-sm font-medium">
+                                        <Check className="w-4 h-4 mt-0.5 text-white/80 shrink-0" />
+                                        <span>Company is a licensed sponsor</span>
+                                    </div>
+                                    <div className="flex items-start gap-3 text-sm font-medium">
+                                        <Check className="w-4 h-4 mt-0.5 text-white/80 shrink-0" />
+                                        <span>Job matches your preferences</span>
+                                    </div>
+                                </div>
+
+                                {/* Company Box */}
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="w-10 h-10 rounded-md border border-[var(--border)] overflow-hidden bg-white flex items-center justify-center shrink-0">
+                                        {selectedJob.company?.url_favicon ? (
+                                            <img src={selectedJob.company.url_favicon} alt="logo" className="w-6 h-6 object-contain" />
+                                        ) : (
+                                            <Building className="w-6 h-6 text-slate-400" />
+                                        )}
+                                    </div>
+                                    <h2 className="text-lg font-bold text-slate-900">{selectedJob.company?.trading_name}</h2>
+                                </div>
+
+                                <div className="flex gap-2 mb-8">
+                                    <a href={selectedJob.company?.url || '#'} target="_blank" rel="noopener noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-sm flex items-center gap-1.5 font-semibold text-slate-700 transition-colors">
+                                        <LinkIcon className="w-3 h-3" /> Website
+                                    </a>
+                                    <a href={selectedJob.company?.url_linkedin || '#'} target="_blank" rel="noopener noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-sm flex items-center gap-1.5 font-semibold text-slate-700 transition-colors">
+                                        <Linkedin className="w-3 h-3" /> LinkedIn
+                                    </a>
+                                </div>
+
+                                {/* About */}
+                                <div>
+                                    <h3 className="font-semibold text-[15px] mb-2 text-slate-900">About the company</h3>
+                                    <p className="text-sm text-slate-600 leading-relaxed">
+                                        {selectedJob.company?.description || `Explore fulfilling opportunities at ${selectedJob.company?.trading_name}. We are always interested in connecting with talented professionals.`}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Sticky Footer Action */}
+                            <div className="p-5 border-t border-[var(--border)] bg-white flex flex-col gap-2 shrink-0">
+                                <a href={fixJobUrl(selectedJob.url)} target="_blank" rel="noopener noreferrer" className="w-full bg-black hover:bg-gray-800 text-white text-center py-3.5 rounded-sm font-semibold text-sm flex items-center justify-center gap-2 transition-colors shadow-md">
+                                    Apply now <ArrowRight className="w-4 h-4" />
+                                </a>
+                                <button className="w-full bg-white hover:bg-slate-50 border border-[var(--border)] text-slate-800 text-center py-3 rounded-sm font-semibold text-sm flex items-center justify-center gap-2 transition-colors">
+                                    <FileText className="w-4 h-4" /> Generate job-specific CV
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            )}
+            </div>
         </div>
     );
 }
