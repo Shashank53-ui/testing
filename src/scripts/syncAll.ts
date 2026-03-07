@@ -61,7 +61,7 @@ function isUKLocation(loc: any): boolean {
     // Explicit exclusions for known false positives
     if (l.includes('ukraine')) return false;
     // Use regex word boundaries (\b) to ensure we match whole words, not substrings
-    const ukRegex = /\b(uk|united kingdom|gb|england|scotland|wales|london|manchester|birmingham|edinburgh|bristol|cambridge|oxford|glasgow|leeds|sheffield|newcastle|cardiff|liverpool|nottingham|reading|brighton|southampton|belfast|coventry|northampton|milton keynes|remote - uk|uk remote|richmond)\b/;
+    const ukRegex = /\b(uk|united kingdom|gb|england|scotland|wales|london|manchester|birmingham|edinburgh|bristol|cambridge|oxford|glasgow|leeds|sheffield|newcastle|cardiff|liverpool|nottingham|reading|brighton|southampton|belfast|coventry|northampton|milton keynes|remote - uk|uk remote|richmond|halifax|sunderland|leicester|chester|basingstoke|knutsford|canary wharf|radbroke|gloucester|solihull|warwick|bromley|southend|hove|purley|gildersome|portishead|pendeford|barnwood|united kingdom)\b/;
 
     // Allow "X Locations" if it's potentially UK (will be refined later or trusted by filter)
     const isMulti = /\d+ locations/i.test(l);
@@ -151,25 +151,42 @@ async function fetchLever(token: string): Promise<Job[]> {
 }
 
 async function fetchWorkable(token: string): Promise<Job[]> {
-    try {
-        const r = await fetch(`https://apply.workable.com/api/v3/accounts/${token}/jobs`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Referer': `https://apply.workable.com/${token}/`
-            },
-            body: JSON.stringify({ query: '', location: [], department: [], worktype: [], remote: [] })
-        });
-        if (!r.ok) return [];
-        const d = await r.json();
-        return (d.results || []).map((j: any) => ({
-            title: j.title || '',
-            location: j.location?.city ? `${j.location.city}, ${j.location.country || ''}` : (j.location?.country || j.country || ''),
-            url: `https://apply.workable.com/${token}/j/${j.shortcode}/`,
-            department: j.department || ''
-        }));
-    } catch { return []; }
+    const allJobs: Job[] = [];
+    let nextToken = '';
+    const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+    for (let i = 0; i < 10; i++) { // Limit to 10 pages (~100-200 jobs)
+        try {
+            const body: any = { query: '', location: [], department: [], worktype: [], remote: [] };
+            if (nextToken) body.next = nextToken;
+
+            const r = await fetch(`https://apply.workable.com/api/v3/accounts/${token}/jobs`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                    'User-Agent': ua,
+                    'Referer': `https://apply.workable.com/${token}/`
+                },
+                body: JSON.stringify(body)
+            });
+            if (!r.ok) break;
+            const d = await r.json();
+            const results = d.results || [];
+            if (results.length === 0) break;
+
+            allJobs.push(...results.map((j: any) => ({
+                title: j.title || '',
+                location: j.location?.city ? `${j.location.city}, ${j.location.country || ''}` : (j.location?.country || j.country || ''),
+                url: `https://apply.workable.com/${token}/j/${j.shortcode}/`,
+                department: Array.isArray(j.department) ? j.department[0] : (j.department || '')
+            })));
+
+            nextToken = d.nextPage;
+            if (!nextToken) break;
+            await sleep(500);
+        } catch { break; }
+    }
+    return allJobs;
 }
 
 async function fetchTeamtailor(token: string): Promise<Job[]> {
@@ -443,7 +460,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
                     })));
 
                     offset += 20;
-                    if (offset >= 100) break;
+                    if (offset >= 2000) break;
                     await sleep(300);
                 }
                 return allJobs;
@@ -669,12 +686,14 @@ const FETCHERS: Record<string, (token: string) => Promise<Job[]>> = {
     recruitee: fetchRecruitee,
     personio: fetchPersonio,
     workday: fetchWorkday,
+    workday_enterprise: fetchWorkday,
     oracle_cloud: fetchOracleCloud,
     successfactors: fetchSuccessFactors,
     eightfold: fetchEightfold,
     hibob: fetchHibob,
     wipro: fetchWipro,
     icims: fetchICIMS,
+    breezyhr: fetchBreezy,
 };
 
 // Providers that return UK-only results natively (no keyword filter needed)
