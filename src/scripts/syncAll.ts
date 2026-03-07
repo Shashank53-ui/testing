@@ -304,9 +304,13 @@ async function fetchPinpoint(token: string): Promise<Job[]> {
         const d = await r.json();
         return (d.data || []).map((j: any) => {
             const locRaw = j.location;
-            const location = locRaw && typeof locRaw === 'object'
-                ? (locRaw.name || locRaw.city || '')
-                : String(locRaw || '');
+            let location = '';
+            if (locRaw && typeof locRaw === 'object') {
+                const parts = [locRaw.name || locRaw.city, locRaw.province].filter(Boolean);
+                location = parts.join(', ');
+            } else {
+                location = String(locRaw || '');
+            }
             return {
                 title: j.title || '',
                 location,
