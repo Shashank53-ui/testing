@@ -26,23 +26,32 @@ async function run() {
     let successCount = 0;
     let errorCount = 0;
 
+    const currentSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jbuikhbssecxhfunkaol.supabase.co';
+
     for (let i = 0; i < companies.length; i += BATCH_SIZE) {
-        const batch = companies.slice(i, i + BATCH_SIZE).map((c: any) => ({
-            id: c.id,
-            trading_name: c.trading_name,
-            companies_house_name: c.companies_house_name,
-            url: c.url,
-            url_linkedin: c.url_linkedin,
-            description: c.description,
-            policy: c.policy,
-            open_to_sponsorship: c.open_to_sponsorship,
-            active_jobs_count: c.active_jobs_count,
-            url_favicon: c.url_favicon,
-            licensed_sponsor: c.licensed_sponsor !== undefined ? c.licensed_sponsor : true,
-            estimated_num_employees_label: c.estimated_num_employees_label,
-            ats_provider: c.ats_provider || null,
-            ats_board_token: c.ats_board_token || null
-        }));
+        const batch = companies.slice(i, i + BATCH_SIZE).map((c: any) => {
+            let faviconUrl = c.url_favicon;
+            if (faviconUrl && currentSupabaseUrl) {
+                faviconUrl = faviconUrl.replace(/^https:\/\/[^\/]+(\/storage\/)/, `${currentSupabaseUrl}$1`);
+            }
+
+            return {
+                id: c.id,
+                trading_name: c.trading_name,
+                companies_house_name: c.companies_house_name,
+                url: c.url,
+                url_linkedin: c.url_linkedin,
+                description: c.description,
+                policy: c.policy,
+                open_to_sponsorship: c.open_to_sponsorship,
+                active_jobs_count: c.active_jobs_count,
+                url_favicon: faviconUrl,
+                licensed_sponsor: c.licensed_sponsor !== undefined ? c.licensed_sponsor : true,
+                estimated_num_employees_label: c.estimated_num_employees_label,
+                ats_provider: c.ats_provider || null,
+                ats_board_token: c.ats_board_token || null
+            };
+        });
 
         const { error } = await supabase
             .from('companies')
