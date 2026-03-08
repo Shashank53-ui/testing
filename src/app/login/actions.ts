@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { headers } from 'next/headers'
 import { createClient } from '@/utils/supabase/server'
 
 // Map raw Supabase error messages to generic user-facing strings
@@ -52,13 +51,13 @@ export async function login(formData: FormData) {
 
 export async function loginWithGoogle() {
     const supabase = await createClient()
-    const headerList = await headers()
-    const origin = headerList.get('origin')
+    // Use env var in production; fall back to request origin in dev
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
 
     const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-            redirectTo: `${origin}/auth/callback`,
+            redirectTo: `${siteUrl}/auth/callback`,
         },
     })
 
@@ -109,8 +108,7 @@ export async function signup(formData: FormData) {
 
 export async function requestPasswordReset(formData: FormData) {
     const supabase = await createClient()
-    const headerList = await headers()
-    const origin = headerList.get('origin')
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
 
     // 1. Verify Turnstile
     const turnstileToken = formData.get('cf-turnstile-response') as string
@@ -122,7 +120,7 @@ export async function requestPasswordReset(formData: FormData) {
     const email = formData.get('email') as string
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${origin}/auth/callback?next=/reset-password`,
+        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
     })
 
     if (error) {
