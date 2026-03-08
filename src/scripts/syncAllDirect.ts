@@ -161,10 +161,16 @@ async function fetchWorkable(token: string): Promise<Job[]> {
     let nextToken = '';
     const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
-    for (let i = 0; i < 10; i++) { // Limit to 10 pages (~100-200 jobs)
+    for (let i = 0; i < 50; i++) { // Increased to 50 pages for large boards like ABM
         try {
-            const body: any = { query: '', location: [], department: [], worktype: [], remote: [] };
-            if (nextToken) body.next = nextToken;
+            const body: any = {
+                query: '',
+                location: [],
+                department: [],
+                worktype: [],
+                remote: []
+            };
+            if (nextToken) body.token = nextToken;
 
             const r = await fetch(`https://apply.workable.com/api/v3/accounts/${token}/jobs`, {
                 method: 'POST',
@@ -189,7 +195,7 @@ async function fetchWorkable(token: string): Promise<Job[]> {
 
             nextToken = d.nextPage;
             if (!nextToken) break;
-            await sleep(500);
+            await sleep(400);
         } catch { break; }
     }
     return allJobs;
@@ -388,7 +394,6 @@ async function fetchWorkday(token: string): Promise<Job[]> {
     const isWorkdaySite = slug === 'wf' || slug.includes('hcahealthcare');
 
     for (const wd of ['wd3', 'wd1', 'wd5', 'wd103', 'wd107', 'wd108', 'wd12', 'wd2']) {
-        // Try both slug.wd.domain and wd.domain
         const domains = isWorkdaySite
             ? [`${slug}.${wd}.myworkdaysite.com`, `${wd}.myworkdaysite.com`]
             : [`${slug}.${wd}.myworkdayjobs.com`, `${wd}.myworkdayjobs.com`];
@@ -398,6 +403,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
             const publicBase = `https://${domain}/en-US/${board}`;
 
             try {
+                // Initial request to get total and facets
                 let res = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
@@ -408,7 +414,6 @@ async function fetchWorkday(token: string): Promise<Job[]> {
                 });
 
                 if (!res.ok) {
-                    // Try alternate location facet
                     res = await fetch(apiUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
@@ -420,7 +425,6 @@ async function fetchWorkday(token: string): Promise<Job[]> {
                 }
 
                 if (!res.ok) {
-                    // Fallback: no facets
                     res = await fetch(apiUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
@@ -428,55 +432,48 @@ async function fetchWorkday(token: string): Promise<Job[]> {
                     });
                 }
 
-                if (!res.ok) {
-                    continue;
-                }
+                if (!res.ok) continue;
 
                 const data = await res.json();
                 const posts = data?.jobPostings || [];
+                const total = data.total || posts.length || 0;
 
-                if (posts.length === 0) {
+                if (total === 0) {
                     if (isWorkdaySite) break;
                     continue;
                 }
 
                 const allJobs: Job[] = [];
-                let offset = 0;
-                const total = data.total || 0;
+                let currentOffset = 0;
 
-                while (offset < total || offset === 0) {
-                    let currentPosts = posts;
-                    if (offset > 0) {
-                        const nextRes = await fetch(apiUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
-                            body: JSON.stringify({
-                                appliedFacets: data.appliedFacets || {},
-                                limit: 20, offset, searchText: ''
-                            })
-                        });
-                        if (nextRes.ok) {
-                            const nextData = await nextRes.json();
-                            currentPosts = nextData.jobPostings || [];
-                        } else break;
-                    }
+                while (currentOffset < total) {
+                    const pageRes = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
+                        body: JSON.stringify({
+                            appliedFacets: data.appliedFacets || {},
+                            limit: 20, offset: currentOffset, searchText: ''
+                        })
+                    });
 
-                    if (currentPosts.length === 0) break;
-                    allJobs.push(...currentPosts.map((j: any) => ({
-                        title: j.title || '',
-                        location: j.locationsText || '',
-                        url: `${publicBase}${j.externalPath}`,
-                        department: ''
-                    })));
+                    if (pageRes.ok) {
+                        const pageData = await pageRes.json();
+                        const pagePosts = pageData.jobPostings || [];
+                        if (pagePosts.length === 0) break;
+                        allJobs.push(...pagePosts.map((j: any) => ({
+                            title: j.title || '',
+                            location: j.locationsText || '',
+                            url: `${publicBase}${j.externalPath}`,
+                            department: ''
+                        })));
+                    } else break;
 
-                    offset += 20;
-                    if (offset >= 2000) break;
-                    await sleep(300);
+                    currentOffset += 20;
+                    if (currentOffset >= 5000) break; // Increased safety limit
+                    await sleep(400);
                 }
                 return allJobs;
-            } catch {
-                continue;
-            }
+            } catch { continue; }
         }
     }
     return [];
@@ -840,20 +837,22 @@ async function syncAll() {
 
                     await pool.query('COMMIT');
 
-                    result.saved = rows.length;
-                    totalSaved += rows.length;
+                    if (rows.length > 0) {
+                        result.saved = rows.length;
+                        totalSaved += rows.length;
+                    }
                 } catch (jobErr: any) {
                     await pool.query('ROLLBACK');
                     result.error = jobErr.message;
                     console.error(`  ❌ ${jobErr.message}`);
                 }
-            }
 
-            // Always update active_jobs_count (even if 0 — keeps data fresh)
-            try {
-                await pool.query('UPDATE public.companies SET active_jobs_count = $1 WHERE id = $2', [ukJobs.length, id]);
-            } catch (updateErr) {
-                // Ignore silent errors for individual counts
+                // Always update active_jobs_count (even if 0 — keeps data fresh)
+                try {
+                    await pool.query('UPDATE public.companies SET active_jobs_count = $1 WHERE id = $2', [ukJobs.length, id]);
+                } catch (updateErr) {
+                    // Ignore silent errors for individual counts
+                }
             }
 
         } catch (e: any) {

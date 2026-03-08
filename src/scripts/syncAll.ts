@@ -23,13 +23,15 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 import * as cheerio from 'cheerio';
+import crypto from 'crypto';
+import { chromium } from 'playwright';
 import { inferJobLevel } from '../lib/inferJobLevel';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -39,6 +41,7 @@ interface Job {
     location: string;
     url: string;
     department?: string;
+    salary?: string;
 }
 
 interface SyncResult {
@@ -54,19 +57,67 @@ interface SyncResult {
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
+async function fetchWithTimeout(url: string, options: any = {}, timeout = 15000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+    } catch (error) {
+        clearTimeout(id);
+        throw error;
+    }
+}
+
+const UK_COUNTRIES = ["uk", "united kingdom", "gb", "gbr", "great britain"];
+const UK_NATIONS = ["england", "scotland", "wales", "northern ireland"];
+const UK_CITIES = [
+    "london", "manchester", "birmingham", "leeds", "glasgow", "edinburgh",
+    "bristol", "liverpool", "nottingham", "sheffield", "cardiff", "belfast",
+    "newcastle", "cambridge", "oxford", "reading", "brighton", "southampton",
+    "coventry", "leicester", "york", "bath", "milton keynes", "derby",
+    "portsmouth", "exeter", "plymouth", "aberdeen", "dundee", "stoke",
+    "luton", "swindon", "warrington", "bolton", "rochdale", "sunderland"
+];
+
+function normalizeLocation(str: string): string {
+    return String(str || '')
+        .toLowerCase()
+        .replace(/[()]/g, '')
+        .replace(/[\/\-_|,]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function isUKLocation(loc: any): boolean {
     if (!loc) return false;
-    const l = String(loc).toLowerCase();
+    const normalized = normalizeLocation(loc);
+    if (normalized.includes("ukraine")) return false;
 
-    // Explicit exclusions for known false positives
-    if (l.includes('ukraine')) return false;
-    // Use regex word boundaries (\b) to ensure we match whole words, not substrings
-    const ukRegex = /\b(uk|uki|uk&i|united kingdom|gb|england|scotland|wales|london|manchester|birmingham|edinburgh|bristol|cambridge|oxford|glasgow|leeds|sheffield|newcastle|cardiff|liverpool|nottingham|reading|brighton|southampton|belfast|coventry|northampton|milton keynes|remote - uk|uk remote|richmond|halifax|sunderland|leicester|chester|basingstoke|knutsford|canary wharf|radbroke|gloucester|solihull|warwick|bromley|southend|hove|purley|gildersome|portishead|pendeford|barnwood|united kingdom)\b/;
+    if (normalized.includes("remote") && (normalized.includes("uk") || normalized.includes("united kingdom"))) {
+        return true;
+    }
 
-    // Allow "X Locations" if it's potentially UK (will be refined later or trusted by filter)
-    const isMulti = /\d+ locations/i.test(l);
+    const tokens = normalized.split(/\s+/);
+    for (const token of tokens) {
+        if (UK_COUNTRIES.includes(token) || UK_NATIONS.includes(token) || UK_CITIES.includes(token)) {
+            return true;
+        }
+    }
 
-    return ukRegex.test(l) || isMulti || (l.endsWith(' uk') || l.endsWith(', uk') || l.endsWith(' united kingdom'));
+    // Multi-word exact phrase match fallback
+    const multiWords = [...UK_COUNTRIES, ...UK_NATIONS, ...UK_CITIES].filter(w => w.includes(' '));
+    for (const phrase of multiWords) {
+        if (normalized.includes(phrase)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function safeStr(s: any, maxLen = 500): string {
@@ -87,7 +138,7 @@ async function fetchGreenhouse(token: string): Promise<Job[]> {
     for (const sub of subdomains) {
         const url = `https://${sub}.greenhouse.io/v1/boards/${boardToken}/jobs?content=true${officeId ? `&office_id=${officeId}` : ''}`;
         try {
-            const r = await fetch(url, {
+            const r = await fetchWithTimeout(url, {
                 headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' }
             });
             if (!r.ok) continue;
@@ -98,7 +149,8 @@ async function fetchGreenhouse(token: string): Promise<Job[]> {
                 title: j.title || '',
                 location: j.location?.name || '',
                 url: j.absolute_url || j.url || '',
-                department: j.departments?.[0]?.name || ''
+                department: j.departments?.[0]?.name || '',
+                salary: undefined
             }));
             if (jobs.length > 0) return jobs;
         } catch { }
@@ -108,7 +160,7 @@ async function fetchGreenhouse(token: string): Promise<Job[]> {
 
 async function fetchAshby(token: string): Promise<Job[]> {
     try {
-        const r = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${token}`);
+        const r = await fetchWithTimeout(`https://api.ashbyhq.com/posting-api/job-board/${token}`);
         if (!r.ok) return [];
         const d = await r.json();
         return (d.jobs || []).map((j: any) => {
@@ -120,7 +172,8 @@ async function fetchAshby(token: string): Promise<Job[]> {
                 title: j.title || '',
                 location: `${locRaw} ${secLocs}`.trim(),
                 url: j.jobUrl || '',
-                department: j.department || ''
+                department: j.department || '',
+                salary: undefined
             };
         });
     } catch { return []; }
@@ -130,7 +183,7 @@ async function fetchLever(token: string): Promise<Job[]> {
     // Try EU lever first (easol etc uses eu subdomain)
     for (const base of ['https://api.eu.lever.co/v0/postings', 'https://api.lever.co/v0/postings']) {
         try {
-            const r = await fetch(`${base}/${token}`);
+            const r = await fetchWithTimeout(`${base}/${token}`);
             console.log(`[DEBUG] Lever ${token} ${base} status: ${r.status}`);
             if (r.ok) {
                 const d = await r.json();
@@ -139,7 +192,8 @@ async function fetchLever(token: string): Promise<Job[]> {
                         title: j.text || '',
                         location: j.categories?.location || j.workplaceType || '',
                         url: j.hostedUrl || '',
-                        department: j.categories?.department || j.categories?.team || ''
+                        department: j.categories?.department || j.categories?.team || '',
+                        salary: undefined
                     }));
                 }
             }
@@ -160,7 +214,7 @@ async function fetchWorkable(token: string): Promise<Job[]> {
             const body: any = { query: '', location: [], department: [], worktype: [], remote: [] };
             if (nextToken) body.next = nextToken;
 
-            const r = await fetch(`https://apply.workable.com/api/v3/accounts/${token}/jobs`, {
+            const r = await fetchWithTimeout(`https://apply.workable.com/api/v3/accounts/${token}/jobs`, {
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
@@ -178,7 +232,8 @@ async function fetchWorkable(token: string): Promise<Job[]> {
                 title: j.title || '',
                 location: j.location?.city ? `${j.location.city}, ${j.location.country || ''}` : (j.location?.country || j.country || ''),
                 url: `https://apply.workable.com/${token}/j/${j.shortcode}/`,
-                department: Array.isArray(j.department) ? j.department[0] : (j.department || '')
+                department: Array.isArray(j.department) ? j.department[0] : (j.department || ''),
+                salary: undefined
             })));
 
             nextToken = d.nextPage;
@@ -194,7 +249,7 @@ async function fetchTeamtailor(token: string): Promise<Job[]> {
     // 1. Try JSON first
     try {
         const url = token.includes('.') ? `https://${token}/jobs.json` : `https://${token}.teamtailor.com/jobs.json`;
-        const r = await fetch(url, {
+        const r = await fetchWithTimeout(url, {
             headers: {
                 'User-Agent': ua,
                 'Accept': 'application/vnd.api+json',
@@ -208,7 +263,8 @@ async function fetchTeamtailor(token: string): Promise<Job[]> {
                     title: j.attributes?.title || '',
                     location: j.attributes?.['human-location'] || '',
                     url: j.links?.['careersite-job-url'] || '',
-                    department: ''
+                    department: '',
+                    salary: undefined
                 }));
             }
         }
@@ -217,7 +273,7 @@ async function fetchTeamtailor(token: string): Promise<Job[]> {
     // 2. Try RSS as fallback
     try {
         const rssUrl = token.includes('.') ? `https://${token}/jobs.rss` : `https://${token}.teamtailor.com/jobs.rss`;
-        const r = await fetch(rssUrl, { headers: { 'User-Agent': ua } });
+        const r = await fetchWithTimeout(rssUrl, { headers: { 'User-Agent': ua } });
         if (!r.ok) return [];
 
         const xml = await r.text();
@@ -230,7 +286,8 @@ async function fetchTeamtailor(token: string): Promise<Job[]> {
                 title: item.find('title').text().trim(),
                 location: item.find('description').text().split('·')[1]?.trim() || 'UK',
                 url: item.find('link').text().trim(),
-                department: item.find('category').first().text().trim()
+                department: item.find('category').first().text().trim(),
+                salary: (typeof item !== 'undefined' && (item as any)?.salary) ? String(typeof (item as any).salary === 'object' ? JSON.stringify((item as any).salary) : (item as any).salary) : null
             });
         });
         return jobs;
@@ -240,18 +297,19 @@ async function fetchTeamtailor(token: string): Promise<Job[]> {
 async function fetchBambooHR(token: string): Promise<Job[]> {
     try {
         // Try the open /careers/list endpoint first
-        const r = await fetch(`https://${token}.bamboohr.com/careers/list`);
+        const r = await fetchWithTimeout(`https://${token}.bamboohr.com/careers/list`);
         if (r.ok) {
             const d = await r.json();
             return (d.result || []).map((j: any) => ({
                 title: j.jobOpeningName || '',
                 location: `${j.location?.city || ''} ${j.location?.state || ''}`.trim(),
                 url: `https://${token}.bamboohr.com/careers/${j.id}`,
-                department: ''
+                department: '',
+                salary: undefined
             }));
         }
         // Fallback: applicant tracking API
-        const r2 = await fetch(
+        const r2 = await fetchWithTimeout(
             `https://api.bamboohr.com/api/gateway.php/${token}/v1/applicant_tracking/jobs?status=Open`,
             { headers: { 'Accept': 'application/json' } }
         );
@@ -261,7 +319,8 @@ async function fetchBambooHR(token: string): Promise<Job[]> {
             title: j.jobTitle?.label || j.title || '',
             location: j.location?.label || '',
             url: `https://${token}.bamboohr.com/jobs/${j.id}/`,
-            department: j.department?.label || ''
+            department: j.department?.label || '',
+            salary: undefined
         }));
     } catch { return []; }
 }
@@ -271,7 +330,7 @@ async function fetchSmartRecruiters(token: string): Promise<Job[]> {
     let offset = 0;
     while (true) {
         try {
-            const r = await fetch(
+            const r = await fetchWithTimeout(
                 `https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=100&offset=${offset}&status=PUBLISHED`
             );
             if (!r.ok) break;
@@ -283,7 +342,8 @@ async function fetchSmartRecruiters(token: string): Promise<Job[]> {
                 title: j.name || '',
                 location: `${j.location?.city || ''} ${j.location?.country || ''}`.trim(),
                 url: `https://jobs.smartrecruiters.com/${token}/${j.id}`,
-                department: j.department?.label || ''
+                department: j.department?.label || '',
+                salary: undefined
             })));
 
             if (content.length < 100) break;
@@ -297,7 +357,7 @@ async function fetchSmartRecruiters(token: string): Promise<Job[]> {
 
 async function fetchPinpoint(token: string): Promise<Job[]> {
     try {
-        const r = await fetch(`https://${token}.pinpointhq.com/postings.json`, {
+        const r = await fetchWithTimeout(`https://${token}.pinpointhq.com/postings.json`, {
             headers: { 'Accept': 'application/json' }
         });
         if (!r.ok) return [];
@@ -315,7 +375,8 @@ async function fetchPinpoint(token: string): Promise<Job[]> {
                 title: j.title || '',
                 location,
                 url: j.url || `https://${token}.pinpointhq.com${j.path || ''}`,
-                department: j.job_function || j.department || ''
+                department: j.job_function || j.department || '',
+                salary: undefined
             };
         });
     } catch { return []; }
@@ -323,28 +384,34 @@ async function fetchPinpoint(token: string): Promise<Job[]> {
 
 async function fetchBreezy(token: string): Promise<Job[]> {
     try {
-        const r = await fetch(`https://${token}.breezy.hr/json`);
+        const r = await fetchWithTimeout(`https://${token}.breezy.hr/json`);
         if (!r.ok) return [];
         const d = await r.json();
         return (d || []).map((j: any) => ({
             title: j.name || '',
             location: j.location?.name || '',
             url: j.url || '',
-            department: j.department?.name || ''
+            department: j.department?.name || '',
+            salary: undefined
         }));
     } catch { return []; }
 }
 
 async function fetchRecruitee(token: string): Promise<Job[]> {
     try {
-        const r = await fetch(`https://${token}.recruitee.com/api/offers/?state=published`);
+        const url = token.includes('.')
+            ? `https://${token}/api/offers/?state=published`
+            : `https://${token}.recruitee.com/api/offers/?state=published`;
+
+        const r = await fetchWithTimeout(url);
         if (!r.ok) return [];
         const d = await r.json();
         return (d.offers || []).map((j: any) => ({
             title: j.title || '',
             location: j.location || j.city || '',
             url: j.careers_url || '',
-            department: j.department || ''
+            department: j.department || '',
+            salary: undefined
         }));
     } catch { return []; }
 }
@@ -352,7 +419,7 @@ async function fetchRecruitee(token: string): Promise<Job[]> {
 async function fetchPersonio(token: string): Promise<Job[]> {
     try {
         // Personio XML endpoint — most reliable public endpoint
-        const r = await fetch(`https://${token}.jobs.personio.de/xml?language=en`);
+        const r = await fetchWithTimeout(`https://${token}.jobs.personio.de/xml?language=en`);
         if (!r.ok) return [];
         const xml = await r.text();
         // Simple XML parse without a library — extract <position> blocks
@@ -366,7 +433,8 @@ async function fetchPersonio(token: string): Promise<Job[]> {
                 title: get('name') || get('title'),
                 location: get('office') || get('location'),
                 url: get('jobUrl') || `https://${token}.jobs.personio.de`,
-                department: get('department')
+                department: get('department'),
+                salary: undefined
             };
         });
     } catch { return []; }
@@ -392,7 +460,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
             const publicBase = `https://${domain}/en-US/${board}`;
 
             try {
-                let res = await fetch(apiUrl, {
+                let res = await fetchWithTimeout(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
                     body: JSON.stringify({
@@ -403,7 +471,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
 
                 if (!res.ok) {
                     // Try alternate location facet
-                    res = await fetch(apiUrl, {
+                    res = await fetchWithTimeout(apiUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
                         body: JSON.stringify({
@@ -415,7 +483,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
 
                 if (!res.ok) {
                     // Fallback: no facets
-                    res = await fetch(apiUrl, {
+                    res = await fetchWithTimeout(apiUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
                         body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: 0, searchText: '' })
@@ -441,7 +509,7 @@ async function fetchWorkday(token: string): Promise<Job[]> {
                 while (offset < total || offset === 0) {
                     let currentPosts = posts;
                     if (offset > 0) {
-                        const nextRes = await fetch(apiUrl, {
+                        const nextRes = await fetchWithTimeout(apiUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'Referer': publicBase },
                             body: JSON.stringify({
@@ -460,7 +528,8 @@ async function fetchWorkday(token: string): Promise<Job[]> {
                         title: j.title || '',
                         location: j.locationsText || '',
                         url: `${publicBase}${j.externalPath}`,
-                        department: ''
+                        department: '',
+                        salary: undefined
                     })));
 
                     offset += 20;
@@ -480,14 +549,15 @@ async function fetchOracleCloud(token: string): Promise<Job[]> {
     try {
         const [domain, site] = token.split('|');
         const url = `https://${domain}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.workLocation,requisitionList.otherWorkLocations,requisitionList.secondaryLocations,flexFieldsFacet.values,requisitionList.requisitionFlexFields&finder=findReqs;siteNumber=${site},facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,limit=100,sortBy=POSTING_DATES_DESC`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
         if (!res.ok) return [];
         const data: any = await res.json();
         return (data.items?.[0]?.requisitionList || []).map((j: any) => ({
             title: j.Title || '',
             location: j.PrimaryLocation || j.workLocation?.Region || '',
             url: `https://${domain}/hcmUI/CandidateExperience/en/sites/${site}/job/${j.Id}`,
-            department: j.Organization || ''
+            department: j.Organization || '',
+            salary: undefined
         }));
     } catch { return []; }
 }
@@ -497,7 +567,7 @@ async function fetchWipro(token: string): Promise<Job[]> {
     let pageNumber = 0;
     while (true) {
         try {
-            const r = await fetch("https://careers.wipro.com/services/recruiting/v1/jobs", {
+            const r = await fetchWithTimeout("https://careers.wipro.com/services/recruiting/v1/jobs", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -529,7 +599,8 @@ async function fetchWipro(token: string): Promise<Job[]> {
                     title: j.unifiedStandardTitle || "",
                     location: (j.jobLocationShort && j.jobLocationShort[0]) || "UK",
                     url: `https://careers.wipro.com/job/${j.unifiedUrlTitle}/${j.id}-en_US`,
-                    department: (j.custRMKMappingPicklist && j.custRMKMappingPicklist[0]) || ""
+                    department: (j.custRMKMappingPicklist && j.custRMKMappingPicklist[0]) || "",
+                    salary: undefined
                 };
             }));
 
@@ -548,7 +619,7 @@ async function fetchSuccessFactors(token: string): Promise<Job[]> {
     while (true) {
         try {
             const url = `https://careers.${token}/search/?q=&locationsearch=united+kingdom&startrow=${startrow}`;
-            const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
             if (!res.ok) break;
             const html = await res.text();
             const $ = cheerio.load(html);
@@ -565,6 +636,8 @@ async function fetchSuccessFactors(token: string): Promise<Job[]> {
                         title,
                         location: location.split('\n')[0].trim() || 'UK',
                         url: jobUrl.startsWith('http') ? jobUrl : `https://careers.${token}${jobUrl}`
+                        ,
+                        salary: undefined
                     });
                 }
             });
@@ -583,7 +656,7 @@ async function fetchHibob(token: string): Promise<Job[]> {
         const domain = token.includes('.') ? token : `${token}.careers.hibob.com`;
         const companyId = token.split('.')[0];
 
-        const r = await fetch(`https://${domain}/api/job-ad`, {
+        const r = await fetchWithTimeout(`https://${domain}/api/job-ad`, {
             headers: {
                 'Accept': 'application/json',
                 'companyidentifier': companyId,
@@ -596,7 +669,8 @@ async function fetchHibob(token: string): Promise<Job[]> {
             title: j.title || '',
             location: `${j.site || ''} ${j.country || ''}`.trim(),
             url: `https://${domain}/jobs/${j.id}`,
-            department: typeof j.department === 'string' ? j.department : (j.department?.name || '')
+            department: typeof j.department === 'string' ? j.department : (j.department?.name || ''),
+            salary: undefined
         }));
     } catch { return []; }
 }
@@ -615,7 +689,7 @@ async function fetchEightfold(token: string): Promise<Job[]> {
             const countryFilter = country ? `&filter_country=${encodeURIComponent(country)}` : '';
             const url = `https://jobs.${domain}/api/pcsx/search?domain=${domain}&query=&location=&start=${start}&sort_by=timestamp${countryFilter}`;
 
-            const res = await fetch(url, {
+            const res = await fetchWithTimeout(url, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                     'Accept': 'application/json'
@@ -631,7 +705,8 @@ async function fetchEightfold(token: string): Promise<Job[]> {
                 title: p.name || '',
                 location: p.locations?.[0] || p.standardizedLocations?.[0] || 'UK',
                 url: `https://jobs.${domain}${p.positionUrl}`,
-                department: p.department || ''
+                department: p.department || '',
+                salary: (typeof p !== 'undefined' && (p as any)?.salary) ? String(typeof (p as any).salary === 'object' ? JSON.stringify((p as any).salary) : (p as any).salary) : null
             })));
 
             if (positions.length < PAGE_SIZE) break;
@@ -652,7 +727,7 @@ async function fetchICIMS(token: string): Promise<Job[]> {
 
         while (true) {
             const url = `https://${token}.icims.com/jobs/search?pr=${pr}&in_iframe=1&schemaId=job&json=1`;
-            const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
             if (!res.ok) break;
 
             const data: any = await res.json();
@@ -664,7 +739,8 @@ async function fetchICIMS(token: string): Promise<Job[]> {
                 title: j.title || j.JobTitle || '',
                 location: j.location || j.JobLocation || 'UK',
                 url: j.url || `https://${token}.icims.com/jobs/${j.id || j.JobId}/job`,
-                department: j.department || j.JobCategory || ''
+                department: j.department || j.JobCategory || '',
+                salary: undefined
             })));
 
             if (results.length < 10) break; // Arbitrary small page size check
@@ -679,7 +755,7 @@ async function fetchRippling(token: string): Promise<Job[]> {
     // Rippling uses Next.js - job data is embedded in __NEXT_DATA__ script tag
     try {
         const url = `https://ats.rippling.com/${token}/jobs`;
-        const r = await fetch(url, {
+        const r = await fetchWithTimeout(url, {
             headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' }
         });
         if (!r.ok) return [];
@@ -694,12 +770,160 @@ async function fetchRippling(token: string): Promise<Job[]> {
             title: j.name || '',
             location: (j.locations || []).map((l: any) => l.name || l.city || '').join(', '),
             url: j.url || `https://ats.rippling.com/${token}/jobs/${j.id}`,
-            department: j.department?.name || ''
+            department: j.department?.name || '',
+            salary: undefined
         }));
     } catch { return []; }
 }
 
+async function fetchAmazon(token: string): Promise<Job[]> {
+    const allJobs: Job[] = [];
+    const batchSize = 100;
+    let offset = 0;
+    while (true) {
+        const url = `https://www.amazon.jobs/en/search.json?offset=${offset}&result_limit=${batchSize}&sort=relevant&job_type%5B%5D=Full-Time&country%5B%5D=GBR`;
+        try {
+            const res = await fetchWithTimeout(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } });
+            if (!res.ok) break;
+            const data: any = await res.json();
+            if (!data.jobs || data.jobs.length === 0) break;
+            const ukJobs = data.jobs.filter((j: any) => j.country_code === 'UK' || j.country_code === 'GB' || j.country_code === 'GBR');
+            for (const job of ukJobs) {
+                const locParts = [job.normalized_location || job.city, job.state].filter(Boolean);
+                allJobs.push({
+                    title: job.title || '',
+                    location: locParts.join(', ') || 'UK',
+                    url: `https://www.amazon.jobs${job.job_path}`,
+                    department: job.job_category || job.job_family_name || 'Various',
+                    salary: undefined
+                });
+            }
+            if (offset >= data.hits) break;
+            offset += batchSize;
+            await sleep(500);
+        } catch { break; }
+    }
+    return allJobs;
+}
 
+async function fetchJPMorgan(token: string): Promise<Job[]> {
+    const allJobs: Job[] = [];
+    let offset = 0;
+    let total = 1;
+    while (offset < total) {
+        const url = `https://jpmc.fa.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=all&finder=findReqs;siteNumber=CX_1001,facetsList=LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS,limit=25,locationId=300000000289276,offset=${offset},sortBy=POSTING_DATES_DESC`;
+        try {
+            const res = await fetchWithTimeout(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } });
+            if (!res.ok) break;
+            const data: any = await res.json();
+            if (!data.items || data.items.length === 0) break;
+            const pageData = data.items[0];
+            total = pageData.TotalJobsCount;
+            if (pageData.requisitionList) {
+                for (const job of pageData.requisitionList) {
+                    allJobs.push({
+                        title: job.Title || '',
+                        location: job.PrimaryLocation || 'UK',
+                        url: `https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/${job.Id}`,
+                        department: '',
+                        salary: undefined
+                    });
+                }
+            } else { break; }
+            offset += 25;
+            await sleep(500);
+        } catch { break; }
+    }
+    return allJobs;
+}
+
+async function fetchGoldmanSachs(token: string): Promise<Job[]> {
+    const allJobs: Job[] = [];
+    let page = 1;
+    let browser;
+    try {
+        browser = await chromium.launch({ headless: true });
+        const context = await browser.newContext({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' });
+        const pageSession = await context.newPage();
+
+        while (true) {
+            const url = `https://higher.gs.com/results?LOCATION=Birmingham%7CLondon&page=${page}&sort=RELEVANCE`;
+            await pageSession.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+            await pageSession.waitForTimeout(4000);
+            const html = await pageSession.content();
+            const $ = cheerio.load(html);
+            let found = 0;
+            $('a.text-decoration-none[href^="/roles/"]').each((i: number, el: any) => {
+                const link = $(el).attr('href');
+                const title = $(el).find('span.gs-text').first().text().trim();
+                const location = $(el).find('[data-testid="location"]').first().text().replace(/·/g, ', ').replace(/\s+/g, ' ').trim();
+                const department = $(el).parent().find('button.gs-tag__button').text().trim();
+                if (title && link) {
+                    allJobs.push({
+                        title,
+                        location: location || 'UK',
+                        url: `https://higher.gs.com${link}`,
+                        department: department || 'General',
+                        salary: undefined
+                    });
+                    found++;
+                }
+            });
+            if (found === 0) break;
+            page++;
+        }
+    } catch (e) { console.error("Goldman Sachs Error:", e); } finally {
+        if (browser) await browser.close();
+    }
+    return allJobs;
+}
+
+async function fetchGoogle(token: string): Promise<Job[]> {
+    const allJobs: Job[] = [];
+    let page = 1;
+    let browser;
+    try {
+        browser = await chromium.launch({ headless: true });
+        const context = await browser.newContext({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36', viewport: { width: 1280, height: 1080 } });
+        const pageSession = await context.newPage();
+
+        while (true) {
+            const url = `https://www.google.com/about/careers/applications/jobs/results?location=United%20Kingdom&page=${page}`;
+            await pageSession.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+            try { await pageSession.waitForSelector('.sMn82b', { timeout: 10000 }); } catch { break; }
+            await pageSession.waitForTimeout(2000);
+            const html = await pageSession.content();
+            const $ = cheerio.load(html);
+            let found = 0;
+            $('div.sMn82b').each((i: number, el: any) => {
+                const title = $(el).find('h3.Qk805e').text().trim() || $(el).find('h3').text().trim();
+                let location = $(el).find('span.r0wTof').text().trim() || 'United Kingdom';
+                if (location.length > 5) {
+                    const half = Math.floor(location.length / 2);
+                    if (location.substring(0, half) === location.substring(half)) location = location.substring(0, half);
+                }
+                const linkStr = $(el).html()?.match(/jobs\/results\/[a-zA-Z0-9-]+/);
+                if (title && linkStr) {
+                    allJobs.push({
+                        title,
+                        location,
+                        url: `https://www.google.com/about/careers/applications/${linkStr[0]}`,
+                        department: 'General',
+                        salary: undefined
+                    });
+                    found++;
+                }
+            });
+            if (found === 0) break;
+            page++;
+        }
+    } catch (e) { console.error("Google Error:", e); } finally {
+        if (browser) await browser.close();
+    }
+    const uniqueMap = new Map();
+    for (const j of allJobs) { uniqueMap.set(j.url, j); }
+    return Array.from(uniqueMap.values());
+}
 
 const FETCHERS: Record<string, (token: string) => Promise<Job[]>> = {
     greenhouse: fetchGreenhouse,
@@ -723,6 +947,10 @@ const FETCHERS: Record<string, (token: string) => Promise<Job[]>> = {
     icims: fetchICIMS,
     breezyhr: fetchBreezy,
     rippling: fetchRippling,
+    amazon: fetchAmazon,
+    goldmansachs: fetchGoldmanSachs,
+    google: fetchGoogle,
+    jpmc: fetchJPMorgan,
 };
 
 // Providers that return UK-only results natively (no keyword filter needed)
@@ -733,6 +961,7 @@ const FETCHERS: Record<string, (token: string) => Promise<Job[]>> = {
 
 async function syncAll() {
     const startTime = Date.now();
+    const syncRunId = crypto.randomUUID();
     console.log('\n════════════════════════════════════════════════════');
     console.log('  DAILY SYNC — ' + new Date().toISOString());
     console.log('════════════════════════════════════════════════════\n');
@@ -785,7 +1014,7 @@ async function syncAll() {
             result.fetched = allJobs.length;
 
             // Apply UK keyword filter to all fetched jobs for safety
-            const ukJobs = allJobs.filter(j => isUKLocation(j.location));
+            const ukJobs = allJobs.filter(j => isUKLocation(j.location) || /uk|united kingdom/i.test(j.title));
 
             result.ukJobs = ukJobs.length;
             console.log(`${allJobs.length} total → ${ukJobs.length} UK`);
@@ -818,10 +1047,15 @@ async function syncAll() {
                 }
             }
 
-            // Always update active_jobs_count (even if 0 — keeps data fresh)
+            // Calculate exact active jobs count directly from DB
+            const { count: finalCount } = await supabase
+                .from('jobs')
+                .select('*', { count: 'exact', head: true })
+                .eq('company_id', id);
+
             await supabase
                 .from('companies')
-                .update({ active_jobs_count: ukJobs.length })
+                .update({ active_jobs_count: finalCount || 0 })
                 .eq('id', id);
 
         } catch (e: any) {

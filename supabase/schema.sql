@@ -33,6 +33,8 @@ CREATE TABLE public.jobs (
     location TEXT,
     department TEXT,
     description TEXT,
+    salary TEXT,
+    level TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
