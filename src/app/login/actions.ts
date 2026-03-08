@@ -97,9 +97,6 @@ export async function signup(formData: FormData) {
         redirect(`/signup?error=${encodeURIComponent(friendlyAuthError(error.message))}`)
     }
 
-    if (!authData.session) {
-        redirect(`/signup?message=${encodeURIComponent('Please check your email to confirm your account (or disable "Confirm Email" in Supabase settings).')}`)
-    }
 
     revalidatePath('/', 'layout')
     // Redirect to home upon first sign up
