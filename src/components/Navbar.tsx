@@ -111,7 +111,7 @@ const Navbar: React.FC<NavbarProps> = ({ user }) => {
                 {/* Mobile Drawer — slides down below navbar */}
                 <div
                     className={`md:hidden overflow-hidden transition-all duration-300 ease-in-out border-t border-[var(--border)] ${mobileOpen ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0'
-                        } glass`}
+                        } bg-white dark:bg-slate-900`}
                 >
                     <div className="px-4 py-4 flex flex-col gap-1">
                         {navLinks.map((link) => (
