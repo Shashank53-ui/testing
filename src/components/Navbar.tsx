@@ -27,6 +27,18 @@ const Navbar: React.FC<NavbarProps> = ({ user }) => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // Prevent body scroll when mobile menu is open
+    useEffect(() => {
+        if (mobileOpen) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+        return () => {
+            document.body.style.overflow = '';
+        };
+    }, [mobileOpen]);
+
     const navLinks = [
         { name: 'Jobs', href: '/jobs' },
         { name: 'Companies', href: '/companies' },
@@ -108,70 +120,84 @@ const Navbar: React.FC<NavbarProps> = ({ user }) => {
                     </button>
                 </div>
 
-                {/* Mobile Drawer — slides down below navbar */}
-                <div
-                    className={`md:hidden overflow-hidden transition-all duration-300 ease-in-out border-t border-[var(--border)] ${mobileOpen ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0'
-                        } glass`}
-                >
-                    <div className="px-4 py-4 flex flex-col gap-1">
-                        {navLinks.map((link) => (
-                            <Link
-                                key={link.href}
-                                href={link.href}
-                                onClick={() => setMobileOpen(false)}
-                                className={`px-4 py-3 rounded-xl text-sm font-semibold transition-colors ${isActive(link.href)
-                                    ? 'text-[#0066FF] bg-blue-50 dark:bg-blue-900/20'
-                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                                    }`}
-                            >
-                                {link.name}
-                            </Link>
-                        ))}
+                {/* Mobile Drawer — fullscreen overlay with menu panel */}
+                {mobileOpen && (
+                    <div className="fixed inset-0 z-40 md:hidden bg-white overflow-y-auto">
+                        {/* Full-screen mobile menu */}
+                        <button
+                            onClick={() => setMobileOpen(false)}
+                            className="absolute top-5 right-4 z-10 p-2 rounded-full text-slate-500 hover:bg-slate-100 active:scale-95 transition-colors"
+                            aria-label="Close menu"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
 
-                        <div className="border-t border-[var(--border)] mt-2 pt-3 flex flex-col gap-2">
-                            {user ? (
-                                <>
+                        <div className="h-full flex flex-col items-center justify-center gap-8 px-6 py-10">
+                            {/* Navigation links */}
+                            <div className="w-full max-w-sm flex flex-col gap-3 text-center">
+                                {navLinks.map((link) => (
                                     <Link
-                                        href="/account/profile"
+                                        key={link.href}
+                                        href={link.href}
                                         onClick={() => setMobileOpen(false)}
-                                        className={`px-4 py-3 rounded-xl text-sm font-semibold transition-colors ${pathname.startsWith('/account')
+                                        className={`block px-5 py-3 rounded-2xl text-base font-semibold transition-colors ${isActive(link.href)
                                             ? 'text-[#0066FF] bg-blue-50 dark:bg-blue-900/20'
-                                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                            : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
                                             }`}
                                     >
-                                        Account
+                                        {link.name}
                                     </Link>
-                                    <form action="/auth/signout" method="POST">
-                                        <button
-                                            type="submit"
-                                            className="w-full text-left px-4 py-3 rounded-xl text-sm font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
-                                        >
-                                            Sign out
-                                        </button>
-                                    </form>
-                                </>
-                            ) : (
-                                <Link
-                                    href="/login"
-                                    onClick={() => setMobileOpen(false)}
-                                    className="w-full text-center bg-[#0066FF] hover:bg-[#0052CC] text-white px-4 py-3 rounded-xl font-bold text-sm transition-colors"
-                                >
-                                    Sign in
-                                </Link>
-                            )}
+                                ))}
+                            </div>
 
-                            <a
-                                href="https://getlanded.canny.io/"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-4 px-4 py-3 rounded-xl text-sm font-semibold text-slate-500 hover:text-[#0066FF] hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors flex items-center gap-2"
-                            >
-                                <MessageSquare className="w-4 h-4" />
-                                Report a bug or suggest a feature
-                            </a>
+                            {/* Account / auth actions */}
+                            <div className="w-full max-w-sm flex flex-col gap-3 text-center">
+                                {user ? (
+                                    <>
+                                        <Link
+                                            href="/account/profile"
+                                            onClick={() => setMobileOpen(false)}
+                                            className={`block px-5 py-3 rounded-2xl text-base font-semibold transition-colors ${pathname.startsWith('/account')
+                                                ? 'text-[#0066FF] bg-blue-50 dark:bg-blue-900/20'
+                                                : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                                }`}
+                                        >
+                                            Account
+                                        </Link>
+                                        <form action="/auth/signout" method="POST">
+                                            <button
+                                                type="submit"
+                                                className="w-full text-center px-5 py-3 rounded-2xl text-base font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+                                            >
+                                                Sign out
+                                            </button>
+                                        </form>
+                                    </>
+                                ) : (
+                                    <Link
+                                        href="/login"
+                                        onClick={() => setMobileOpen(false)}
+                                        className="block w-full text-center bg-[#0066FF] hover:bg-[#0052CC] text-white px-5 py-3 rounded-2xl font-bold text-base transition-colors"
+                                    >
+                                        Sign in
+                                    </Link>
+                                )}
+
+                                <a
+                                    href="https://getlanded.canny.io/"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-1 block px-5 py-3 rounded-2xl text-sm font-semibold text-slate-500 hover:text-[#0066FF] hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors"
+                                >
+                                    <span className="inline-flex items-center justify-center gap-2">
+                                        <MessageSquare className="w-4 h-4" />
+                                        Report a bug or suggest a feature
+                                    </span>
+                                </a>
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
             </nav>
         </>
     );
