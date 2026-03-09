@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Database, Briefcase, MapPin, Building, ChevronRight, Check, CheckCircle2, Link as LinkIcon, Linkedin, FileText, ArrowRight, ShieldCheck, TrendingUp } from 'lucide-react';
+import { Database, Briefcase, MapPin, Building, ChevronRight, Check, CheckCircle2, Link as LinkIcon, Linkedin, FileText, ArrowRight, ShieldCheck, TrendingUp, ThumbsDown } from 'lucide-react';
 import { getJobs, Job, markJobAsApplied } from '../app/actions/jobActions';
+import { reportJobAction } from '../app/actions/reportActions';
+import { getSubscriptionStatus } from '../app/actions/subscriptionActions';
 
 interface JobFeedProps {
     initialJobs: Job[];
@@ -16,6 +18,7 @@ interface JobFeedProps {
         tier2?: string;
         locs?: string | string[];
         userPrefs?: any;
+        type?: string;
     };
 }
 
@@ -34,6 +37,7 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
     const displayedInitialJobs = isGuest ? initialJobs.slice(0, GUEST_LIMIT) : initialJobs;
 
     const [jobs, setJobs] = useState<Job[]>(displayedInitialJobs);
+    const [isPro, setIsPro] = useState(true); // Default to true while loading to avoid flash
     const [page, setPage] = useState(1);
     const [isFetching, setIsFetching] = useState(false);
     const [isMobileDetailsOpen, setIsMobileDetailsOpen] = useState(false);
@@ -44,12 +48,19 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
     // Track seen IDs to avoid duplicates and ensure diversity across "Load More"
     const [seenJobIds, setSeenJobIds] = useState<string[]>(displayedInitialJobs.map(j => j.id));
     const [seenCompanyIds, setSeenCompanyIds] = useState<number[]>(displayedInitialJobs.map(j => j.company_id));
+    const [reportedJobIds, setReportedJobIds] = useState<Set<string>>(new Set());
+    const [dismissingJobIds, setDismissingJobIds] = useState<Set<string>>(new Set());
+    const [hiddenJobIds, setHiddenJobIds] = useState<Set<string>>(new Set());
     // appliedJobIds: map of jobId -> applied timestamp (or true)
     const [appliedJobIds, setAppliedJobIds] = useState<Map<string, string>>(() => {
         const m = new Map<string, string>();
         Object.entries(initialAppliedJobs).forEach(([id, ts]) => m.set(id, ts));
         return m;
     });
+
+    useEffect(() => {
+        getSubscriptionStatus().then(res => setIsPro(res.isPro));
+    }, []);
 
     const totalPages = initialTotalPages;
 
@@ -144,6 +155,34 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
         }
     };
 
+    const handleReportClick = async (e: React.MouseEvent, jobId: string) => {
+        e.stopPropagation();
+        if (reportedJobIds.has(jobId)) return;
+
+        setReportedJobIds(prev => new Set(prev).add(jobId));
+
+        const res = await reportJobAction(Number(jobId));
+        if (!res.success) {
+            setReportedJobIds(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(jobId);
+                return newSet;
+            });
+            alert(res.error || 'Failed to report job');
+        }
+    };
+
+    const handleDismissClick = (e: React.MouseEvent, jobId: string) => {
+        e.stopPropagation();
+        if (dismissingJobIds.has(jobId)) return;
+
+        setDismissingJobIds(prev => new Set(prev).add(jobId));
+
+        setTimeout(() => {
+            setHiddenJobIds(prev => new Set(prev).add(jobId));
+        }, 1500);
+    };
+
     if (jobs.length === 0) {
         return (
             <div className="text-center py-12 sm:py-20 bg-[var(--card)] rounded-none border border-dashed border-[var(--border)] px-6 relative z-10 w-full lg:w-[55%]">
@@ -198,6 +237,8 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
 
                 <div className="space-y-4">
                     {jobs.map((job) => {
+                        if (hiddenJobIds.has(job.id)) return null;
+
                         const isSelected = selectedJobId === job.id;
                         const isNew = job.created_at
                             ? (Date.now() - new Date(job.created_at).getTime()) < 48 * 60 * 60 * 1000
@@ -247,9 +288,25 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
                                 </div>
 
                                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-3 border-t border-[var(--border)] mt-2 gap-3 sm:gap-0">
-                                    <button className="text-[12px] sm:text-[13px] text-slate-500 hover:text-slate-800 font-medium transition-colors text-left">Show less like this</button>
+                                    {dismissingJobIds.has(job.id) ? (
+                                        <div className="flex items-center gap-1.5 text-[12px] sm:text-[13px] text-emerald-600 font-medium">
+                                            <Check className="w-4 h-4" /> We'll show you less like this
+                                        </div>
+                                    ) : (
+                                        <button
+                                            onClick={(e) => handleDismissClick(e, job.id)}
+                                            className="text-[12px] sm:text-[13px] text-slate-500 hover:text-slate-800 font-medium transition-colors text-left flex items-center gap-1.5"
+                                        >
+                                            <ThumbsDown className="w-3.5 h-3.5" /> Show less like this
+                                        </button>
+                                    )}
                                     <div className="flex items-center gap-2">
-                                        <button className="flex-1 sm:flex-none text-[12px] sm:text-[13px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-sm transition-colors text-center">Report</button>
+                                        <button
+                                            onClick={(e) => handleReportClick(e, job.id)}
+                                            disabled={reportedJobIds.has(job.id)}
+                                            className={`flex-1 sm:flex-none text-[12px] sm:text-[13px] font-medium px-3 py-1.5 rounded-sm transition-colors text-center ${reportedJobIds.has(job.id) ? 'bg-orange-50 text-orange-600 border border-orange-100 cursor-default' : 'text-slate-700 bg-slate-100 hover:bg-slate-200'}`}>
+                                            {reportedJobIds.has(job.id) ? 'Reported' : 'Report Expired'}
+                                        </button>
                                         <button
                                             onClick={(e) => handleApplyClick(e, job.id)}
                                             disabled={appliedJobIds.has(job.id) || isGuest}
@@ -287,7 +344,30 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
                                 </div>
                             </div>
                         </div>
-                    ) : page < totalPages && (
+                    ) : !isPro && jobs.length >= 5 ? (
+                        <div className="mt-8 bg-white">
+                            <div className="bg-white border-2 border-[#0066FF] rounded-none p-8 relative overflow-hidden group shadow-lg">
+                                <div className="relative z-10 text-center sm:text-left">
+                                    <div className="flex flex-col sm:flex-row items-center gap-4 mb-4">
+                                        <div className="p-3 bg-blue-50 rounded-xl">
+                                            <TrendingUp className="w-6 h-6 text-[#0066FF]" />
+                                        </div>
+                                        <h3 className="text-xl sm:text-2xl font-black text-black uppercase tracking-tight">Unlock 20,000+ More Jobs</h3>
+                                    </div>
+                                    <p className="text-slate-600 mb-8 max-w-md leading-relaxed text-sm sm:text-base">
+                                        You've reached the limit of the Free Plan. Upgrade to Pro for just <span className="text-[#0066FF] font-black">£0.99/week</span> to see every visa-sponsored job in the UK.
+                                    </p>
+                                    <Link
+                                        href="/account/subscription"
+                                        className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-[#0066FF] hover:bg-[#0052CC] text-white font-black uppercase tracking-widest text-xs transition-all active:scale-95 w-full sm:w-auto rounded-none"
+                                    >
+                                        Upgrade to Pro Plan <ArrowRight className="w-4 h-4" />
+                                    </Link>
+                                    <p className="text-slate-400 text-[10px] mt-4 uppercase tracking-[0.2em] font-bold">Cancel anytime • Secure via Stripe</p>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (page < totalPages) && (
                         <div className="flex items-center justify-center pt-8">
                             <button
                                 onClick={loadMore}

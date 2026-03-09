@@ -43,11 +43,23 @@ export async function updateSession(request: NextRequest) {
         pathname === '/forgot-password' ||
         pathname === '/reset-password'
 
+    const isApi = pathname.startsWith('/api')
+    const isDebug = pathname === '/debug-db'
     const isCallback = pathname.startsWith('/auth/callback')
+    const isAdminRoute = pathname.startsWith('/admin')
+
+    const { isAdmin } = await import('@/utils/auth')
+
+    // 1. Block debug route ENTIRELY in production (and allow only if specifically needed)
+    if (isDebug) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/'
+        return NextResponse.redirect(url)
+    }
 
     if (!user) {
-        // If they are not logged in and not on an auth page/callback, redirect to login
-        if (!isAuthPage && !isCallback) {
+        // If they are not logged in and not on an auth page/callback/api, redirect to login
+        if (!isAuthPage && !isCallback && !isApi) {
             const url = request.nextUrl.clone()
             url.pathname = '/login'
             return NextResponse.redirect(url)
@@ -55,6 +67,13 @@ export async function updateSession(request: NextRequest) {
     } else {
         // If they are logged in but trying to hit an auth page, redirect to home
         if (isAuthPage) {
+            const url = request.nextUrl.clone()
+            url.pathname = '/'
+            return NextResponse.redirect(url)
+        }
+
+        // 2. Admin Route Protection
+        if (isAdminRoute && !isAdmin(user.email)) {
             const url = request.nextUrl.clone()
             url.pathname = '/'
             return NextResponse.redirect(url)

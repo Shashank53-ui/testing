@@ -1,7 +1,8 @@
 'use server';
 
-import { supabase } from '@/lib/supabase';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
+import { getSubscriptionStatus } from './subscriptionActions';
 
 export interface Company {
     id: number;
@@ -25,6 +26,14 @@ export async function getCompanies(params: {
 }) {
     const PAGE_SIZE = 5;
     const page = params.page || 1;
+
+    const { isPro } = await getSubscriptionStatus();
+
+    // Free users only get the first page
+    if (!isPro && page > 1) {
+        return { companies: [], totalPages: 1 };
+    }
+
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
@@ -36,7 +45,8 @@ export async function getCompanies(params: {
         return { companies: [], totalPages: 0 };
     }
 
-    let query = supabase
+    const adminClient = createAdminClient();
+    let query = adminClient
         .from('companies')
         .select('*', { count: 'exact' });
 
@@ -90,7 +100,10 @@ export async function getCompanies(params: {
     // Map back to Company[]
     const cleanCompanies = (rawCompanies || []).map(c => c as unknown as Company);
 
-    const totalPages = count ? Math.ceil(count / PAGE_SIZE) : 0;
+    let totalPages = count ? Math.ceil(count / PAGE_SIZE) : 0;
+    if (!isPro) {
+        totalPages = Math.min(totalPages, 1);
+    }
 
     return { companies: cleanCompanies, totalPages };
 }
