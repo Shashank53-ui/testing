@@ -7,8 +7,10 @@ export default async function ProfilePage() {
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-        redirect('/login');
+        // redirect('/login');
+        return <div>Please log in to view your profile.</div>;
     }
+
 
     const email = user.email;
     const name = user.user_metadata?.full_name || user.user_metadata?.name || 'Not provided';

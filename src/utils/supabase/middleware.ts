@@ -57,14 +57,7 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(url)
     }
 
-    if (!user) {
-        // If they are not logged in and not on an auth page/callback/api, redirect to login
-        if (!isAuthPage && !isCallback && !isApi) {
-            const url = request.nextUrl.clone()
-            url.pathname = '/login'
-            return NextResponse.redirect(url)
-        }
-    } else {
+    if (user) {
         // If they are logged in but trying to hit an auth page, redirect to home
         if (isAuthPage) {
             const url = request.nextUrl.clone()
@@ -79,6 +72,7 @@ export async function updateSession(request: NextRequest) {
             return NextResponse.redirect(url)
         }
     }
+
 
     return supabaseResponse
 }

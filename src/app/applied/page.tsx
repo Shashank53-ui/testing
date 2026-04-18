@@ -19,9 +19,10 @@ export default async function AppliedJobsPage() {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user) {
-        redirect('/login');
-    }
+    // if (!user) {
+    //     redirect('/login');
+    // }
+
 
     const { jobs, success, error } = await getAppliedJobs();
 

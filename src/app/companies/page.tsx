@@ -32,7 +32,8 @@ export default async function CompaniesPage({
         <div className="min-h-screen bg-[var(--background)]">
 
             {/* Full-height container below fixed nav */}
-            <main className="mt-16 flex h-[calc(100vh-4rem)] overflow-hidden px-4 sm:px-6 lg:px-12 w-full mx-auto">
+            <main className="mt-20 sm:mt-24 flex h-[calc(100vh-5rem)] sm:h-[calc(100vh-6rem)] overflow-hidden px-4 sm:px-6 lg:px-12 w-full mx-auto">
+
                 {/* Main Feed Container */}
                 <div className="flex-1 min-w-0 h-full overflow-hidden flex flex-col pb-20 lg:pb-0">
                     <CompanyFeed

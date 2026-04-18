@@ -7,7 +7,8 @@ import { getJobs } from '../actions/jobActions';
 
 export const dynamic = 'force-dynamic';
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
+
 
 // Fix known bad URL patterns (SmartRecruiters API URL -> public page)
 function fixJobUrl(url: string): string {
@@ -73,19 +74,29 @@ export default async function JobsPage({
   return (
     <div className="min-h-screen bg-[var(--background)]">
       {/* Main Content */}
-      <main className="pt-20 sm:pt-24 pb-20 sm:pb-16 px-4 sm:px-6 lg:px-12 max-w-full mx-auto">
+      <main className="pt-20 sm:pt-24 px-4 sm:px-6 lg:px-12 max-w-full mx-auto">
+
+
+
+
+
         <div className="flex flex-col gap-6 sm:gap-8">
 
-          {/* Banner */}
+
+
+          {/* Banner - Disabled as per request
           <div className="bg-[#F8F5EE] border border-amber-100 text-[#6B5A40] text-sm px-4 py-3 mb-6 flex items-center rounded-sm">
             {user
               ? <>You're seeing jobs that match your preferences. You can <Link href="/account/preferences" className="underline font-medium ml-1">change these here</Link>.</>
               : <>You're seeing a preview of jobs. <Link href="/signup" className="underline font-medium ml-1">Create a free account</Link> to get a personalised feed and track applications.</>}
           </div>
+          */}
+
 
           <div className="flex flex-col gap-4">
-            {/* Tabs */}
-            <div className="flex items-center gap-6 border-b border-[var(--border)] overflow-x-auto no-scrollbar">
+            {/* Tabs - Sticky below Navbar */}
+            <div className="sticky top-16 z-30 bg-[var(--background)] flex items-center gap-6 border-b border-[var(--border)] overflow-x-auto no-scrollbar pt-2">
+
               <Link
                 href="/jobs"
                 className={`pb-3 text-sm font-bold whitespace-nowrap border-b-2 transition-colors ${!params.type || params.type !== 'graduate' ? 'border-[#0066FF] text-[#0066FF]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
@@ -102,7 +113,11 @@ export default async function JobsPage({
             </div>
 
             {/* Job Feed Area */}
-            <div className="flex flex-col">
+            <div className="flex flex-col flex-1">
+
+
+
+
               {params.type === 'graduate' ? (
                 <div className="text-center py-16 sm:py-24 bg-[var(--card)] rounded-none border border-dashed border-[var(--border)] px-6 relative z-10 w-full lg:w-[55%]">
                   <Lock className="w-12 h-12 text-slate-300 mx-auto mb-5" />

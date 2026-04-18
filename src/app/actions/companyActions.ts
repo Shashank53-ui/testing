@@ -24,15 +24,17 @@ export async function getCompanies(params: {
     excludedCompanyIds?: number[];
     favoritesOnly?: boolean;
 }) {
-    const PAGE_SIZE = 5;
+    const PAGE_SIZE = 10;
+
     const page = params.page || 1;
 
     const { isPro } = await getSubscriptionStatus();
 
-    // Free users only get the first page
-    if (!isPro && page > 1) {
-        return { companies: [], totalPages: 1 };
-    }
+    // Free users only get the first page - DISABLED for guest browsing
+    // if (!isPro && page > 1) {
+    //     return { companies: [], totalPages: 1 };
+    // }
+
 
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -101,9 +103,10 @@ export async function getCompanies(params: {
     const cleanCompanies = (rawCompanies || []).map(c => c as unknown as Company);
 
     let totalPages = count ? Math.ceil(count / PAGE_SIZE) : 0;
-    if (!isPro) {
-        totalPages = Math.min(totalPages, 1);
-    }
+    // if (!isPro) {
+    //     totalPages = Math.min(totalPages, 1);
+    // }
+
 
     return { companies: cleanCompanies, totalPages };
 }

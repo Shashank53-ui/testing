@@ -38,7 +38,8 @@ export async function getJobs(params: {
     sort?: string;
     type?: string;
 } = {}) {
-    const PAGE_SIZE = 5;
+    const PAGE_SIZE = 10;
+
     const page = params.page || 1;
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -47,10 +48,11 @@ export async function getJobs(params: {
 
     const { isPro } = await getSubscriptionStatus();
 
-    // Free users can only access the first page
-    if (!isPro && page > 1) {
-        return { jobs: [], totalPages: 1 };
-    }
+    // Free users can only access the first page - DISABLED for guest browsing
+    // if (!isPro && page > 1) {
+    //     return { jobs: [], totalPages: 1 };
+    // }
+
 
     const isGraduate = params.type === 'graduate';
 
@@ -284,9 +286,10 @@ export async function getJobs(params: {
     const total = count || 0;
     let totalPages = Math.ceil(total / PAGE_SIZE);
 
-    if (!isPro) {
-        totalPages = 1;
-    }
+    // if (!isPro) {
+    //     totalPages = 1;
+    // }
+
 
     return { jobs: finalJobs, totalPages };
 }

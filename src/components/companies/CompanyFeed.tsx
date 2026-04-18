@@ -326,41 +326,20 @@ export default function CompanyFeed({ initialCompanies, initialTotalPages, searc
                                 );
                             })}
 
-                            {/* Upgrade to Pro Card */}
-                            {!isPro && companies.length >= 5 ? (
-                                <div className="px-4 py-8 border-t border-[var(--border)] bg-white">
-                                    <div className="bg-white border-2 border-[#0066FF] rounded-none p-8 relative overflow-hidden group shadow-lg">
-                                        <div className="relative z-10 text-center sm:text-left">
-                                            <div className="flex flex-col sm:flex-row items-center gap-4 mb-4">
-                                                <div className="p-3 bg-blue-50 rounded-xl">
-                                                    <TrendingUp className="w-6 h-6 text-[#0066FF]" />
-                                                </div>
-                                                <h3 className="text-xl sm:text-2xl font-black text-black uppercase tracking-tight">Unlock 2,500+ Companies</h3>
-                                            </div>
-                                            <p className="text-slate-600 mb-8 max-w-md leading-relaxed text-sm sm:text-base">
-                                                You've reached the limit for free users. Upgrade to Pro for just <span className="text-[#0066FF] font-black">£0.99/week</span> to browse our entire database.
-                                            </p>
-                                            <Link
-                                                href="/account/subscription"
-                                                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-[#0066FF] hover:bg-[#0052CC] text-white font-black uppercase tracking-widest text-xs transition-all active:scale-95 w-full sm:w-auto rounded-none"
-                                            >
-                                                Upgrade to Pro Plan <ArrowRight className="w-4 h-4" />
-                                            </Link>
-                                            <p className="text-slate-400 text-[10px] mt-4 uppercase tracking-[0.2em] font-bold">Cancel anytime • Secure via Stripe</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : page < totalPages && (
-                                <div className="flex justify-center py-6">
+                            {/* Load more button replaces the Pro CTA */}
+                            {page < totalPages && (
+                                <div className="flex justify-center py-8 px-4">
                                     <button
                                         onClick={loadMoreCompanies}
                                         disabled={isFetchingCompanies}
-                                        className="flex items-center gap-2 px-6 py-2 border border-[var(--border)] rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                                        className="w-full bg-[#0066FF] hover:bg-[#0052CC] text-white font-black py-4 rounded-none text-[11px] sm:text-[12px] uppercase tracking-widest text-center transition-all active:scale-95 shadow-lg shadow-[#0066FF]/20 flex items-center justify-center gap-2 disabled:opacity-50"
                                     >
-                                        {isFetchingCompanies ? 'Loading...' : <><ChevronRight className="w-4 h-4" /> Load more companies</>}
+                                        {isFetchingCompanies ? 'Fetching...' : 'Show more companies'}
+                                        {!isFetchingCompanies && <ChevronRight className="w-4 h-4" />}
                                     </button>
                                 </div>
                             )}
+
                         </>
                     )}
                 </div>

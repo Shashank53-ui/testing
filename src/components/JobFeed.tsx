@@ -33,7 +33,8 @@ function fixJobUrl(url: string): string {
 }
 
 export default function JobFeed({ initialJobs, initialTotalPages, initialAppliedJobs = {}, isGuest = false, searchParams }: JobFeedProps) {
-    const GUEST_LIMIT = 2;
+    const GUEST_LIMIT = 10;
+
     const displayedInitialJobs = isGuest ? initialJobs.slice(0, GUEST_LIMIT) : initialJobs;
 
     const [jobs, setJobs] = useState<Job[]>(displayedInitialJobs);
@@ -220,10 +221,14 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
     }
 
     return (
-        <div className="flex flex-col lg:flex-row gap-6 relative items-start lg:h-[calc(100vh-8rem)]">
+        <div className="flex flex-col lg:flex-row gap-6 relative items-start">
 
-            {/* Middle Column: Job List — scrolls independently */}
-            <div className="w-full lg:w-[55%] lg:h-full lg:overflow-y-auto pb-32 sm:pb-8 pr-1 flex flex-col">
+
+
+            {/* Middle Column: Job List — scrolls with page */}
+            <div className="w-full lg:w-[55%] pb-32 sm:pb-8 pr-1 flex flex-col">
+
+
 
                 {/* Mobile Header / Desktop Sort */}
                 <div className="flex items-center justify-between sm:justify-end mb-4 shrink-0">
@@ -351,10 +356,18 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
                                     <p className="text-sm text-slate-500 mb-6 leading-relaxed max-w-xs">
                                         Every job here is at a verified UK visa sponsor. Filtered, updated, and ready for you.
                                     </p>
-                                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-xs">
-                                        <a href="/signup" className="w-full sm:flex-1 bg-[#0066FF] hover:bg-[#0052CC] text-white font-black py-3 rounded-none text-[11px] sm:text-[12px] uppercase tracking-widest text-center transition-all active:scale-95 shadow-lg shadow-[#0066FF]/20">Get started free</a>
+                                    <div className="flex flex-col items-center gap-3 w-full max-w-xs">
+                                        <button
+                                            onClick={loadMore}
+                                            disabled={isFetching}
+                                            className="w-full sm:flex-1 bg-[#0066FF] hover:bg-[#0052CC] text-white font-black py-3 rounded-none text-[11px] sm:text-[12px] uppercase tracking-widest text-center transition-all active:scale-95 shadow-lg shadow-[#0066FF]/20 flex items-center justify-center gap-2"
+                                        >
+                                            {isFetching ? 'Fetching...' : 'Show more'}
+                                            {!isFetching && <ChevronRight className="w-4 h-4" />}
+                                        </button>
                                         <a href="/login" className="w-full sm:flex-1 border border-slate-200 text-slate-700 hover:bg-slate-50 font-black py-3 rounded-none text-[11px] sm:text-[12px] uppercase tracking-widest text-center transition-all active:scale-95">Sign in</a>
                                     </div>
+
                                 </div>
                             </div>
                         </div>
@@ -404,9 +417,9 @@ export default function JobFeed({ initialJobs, initialTotalPages, initialApplied
                 </div>
             </div>
 
-            {/* Job Details Panel */}
-            {/* Mobile: Full-screen overlay when selected */}
-            <div className={`fixed inset-0 z-[60] lg:relative lg:inset-auto lg:z-10 bg-black/40 lg:bg-transparent lg:block lg:w-[45%] lg:h-full ${isMobileDetailsOpen ? 'flex' : 'hidden'}`}>
+            {/* Job Details Panel - Sticky on Desktop */}
+            <div className={`fixed inset-0 z-[60] lg:sticky lg:top-28 lg:z-10 bg-black/40 lg:bg-transparent lg:block lg:w-[45%] lg:h-[calc(100vh-8rem)] ${isMobileDetailsOpen ? 'flex' : 'hidden'}`}>
+
                 <div
                     className={`bg-white w-full h-full lg:h-full lg:border lg:border-[var(--border)] lg:rounded-md lg:shadow-sm overflow-hidden flex flex-col relative transition-transform duration-300 ${isMobileDetailsOpen ? 'translate-y-0' : 'translate-y-full lg:translate-y-0'}`}
                     onClick={(e) => e.stopPropagation()}
