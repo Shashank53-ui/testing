@@ -17,7 +17,9 @@
     "detect:ats": "tsx src/scripts/detectAtsFromCareersPage.ts",
     "detect:ats:test": "tsx src/scripts/detectAtsFromCareersPage.ts --limit 20",
     "detect:ats:single": "tsx src/scripts/detectAtsFromCareersPage.ts --company-id",
-    "import:ats:csv": "tsx src/scripts/importAtsFromCsv.ts"
+    "import:ats:csv": "tsx src/scripts/importAtsFromCsv.ts",
+    "seed:companies": "tsx src/scripts/seedCompaniesFromCsv.ts",
+    "import:full": "tsx src/scripts/importFullCompanies.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -47,7 +49,8 @@
     "react-dom": "19.2.3",
     "stripe": "^20.4.1",
     "tailwindcss": "^4",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20",
