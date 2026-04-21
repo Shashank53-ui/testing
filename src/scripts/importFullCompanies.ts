@@ -53,7 +53,7 @@ async function main() {
     const rows = parsed.data;
     console.log(`Parsed ${rows.length} rows from CSV`);
 
-    const records = rows.map(r => ({
+    const records = rows.map((r: any) => ({
         id:                            r.id ? Number(r.id) : undefined,
         trading_name:                  r.trading_name,
         companies_house_name:          r.companies_house_name || null,
@@ -71,7 +71,7 @@ async function main() {
         // Fallback for timestamps if they exist in CSV
         created_at:                    r.created_at || new Date().toISOString(),
         updated_at:                    r.updated_at || new Date().toISOString(),
-    })).filter(r => r.trading_name); // Must have at least a trading_name
+    })).filter((r: any) => r.trading_name); // Must have at least a trading_name
 
     if (records.length === 0) {
         console.log('No valid records to import.');
