@@ -1,3 +1,4 @@
+export {};
 
 async function findUK() {
     const slug = 'globalhr';

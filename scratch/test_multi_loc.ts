@@ -1,3 +1,4 @@
+export {};
 
 // Copied from syncAll.ts for testing
 function normalizeLocation(loc: any): string {
