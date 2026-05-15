@@ -2,6 +2,8 @@
 
 import { createClient } from '../../utils/supabase/server';
 
+const POSTGRES_UNDEFINED_COLUMN = '42703';
+
 export async function reportJobAction(jobId: number, notes?: string) {
     const supabaseServer = await createClient();
 
@@ -22,7 +24,7 @@ export async function reportJobAction(jobId: number, notes?: string) {
             });
 
         const missingUserIdColumn =
-            (error as { code?: string } | null)?.code === '42703' &&
+            (error as { code?: string } | null)?.code === POSTGRES_UNDEFINED_COLUMN &&
             error?.message?.toLowerCase().includes('user_id');
 
         if (missingUserIdColumn) {
