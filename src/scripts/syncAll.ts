@@ -448,6 +448,16 @@ const PROVIDER_ALIAS: Record<string, string> = {
 
 // Custom company token → fetcher routing
 const CUSTOM_TOKEN_ROUTES: Array<{ pattern: RegExp; fetcher: string }> = [
+    { pattern: /join\.com/i, fetcher: 'join_com' },
+    { pattern: /jazzhr\.com|applytojob\.com/i, fetcher: 'jazzhr' },
+    { pattern: /eploy\.net/i, fetcher: 'eploy' },
+    { pattern: /csod\.com/i, fetcher: 'cornerstone' },
+    { pattern: /gem\.com/i, fetcher: 'gem' },
+    { pattern: /mercor\.com/i, fetcher: 'mercor' },
+    { pattern: /phenompeople\.com/i, fetcher: 'phenom' },
+    { pattern: /recruiterbox\.com/i, fetcher: 'recruiterbox' },
+    { pattern: /taleo\.net/i, fetcher: 'oracle_taleo' },
+
     { pattern: /jpmc\.fa\.oraclecloud|jpmorgan|jpmorganchase/i, fetcher: 'jpmc' },
     { pattern: /higher\.gs\.com|goldman.?sachs/i, fetcher: 'goldmansachs' },
     { pattern: /amazon\.jobs/i, fetcher: 'amazon' },
@@ -2551,6 +2561,349 @@ async function fetchNHS(token: string): Promise<Job[]> {
     return allJobs;
 }
 
+
+
+// --- NEW SCRAPERS ---
+
+async function fetchJazzHR(token: string): Promise<Job[]> {
+    try {
+        const url = `https://${token}.applytojob.com/apply`;
+        const r = await fetchWithTimeout(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Accept': 'text/html' }
+        });
+        if (!r.ok) return [];
+        const html = await r.text();
+        const $ = cheerio.load(html);
+        const jobs: Job[] = [];
+
+        $('li.list-group-item').each((_, el) => {
+            const anchor = $(el).find('h3.list-group-item-heading a, h2 a').first();
+            const title = anchor.text().trim();
+            const jobUrl = anchor.attr('href') || '';
+            if (!title || !jobUrl) return;
+
+            const listItems = $(el).find('ul.list-inline li');
+            // First li = location (has map-marker icon), second = department/type
+            const location = listItems.eq(0).text().replace(/^\s*\S+\s*/, '').trim(); // strip icon char
+            const department = listItems.eq(1).text().trim();
+
+            jobs.push({ title, location, url: jobUrl, department, salary: undefined });
+        });
+
+        return jobs;
+    } catch { return []; }
+}
+
+// ΓöÇΓöÇΓöÇ Oracle Taleo ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// Token is a full URL like https://arm.taleo.net/careersection/arm_external/joblist.ftl
+// We extract tenant + section and hit the public REST API.
+async function fetchOracleTaleo(token: string): Promise<Job[]> {
+    try {
+        let tenant = '';
+        let section = '';
+
+        if (token.startsWith('http')) {
+            const parsed = new URL(token);
+            tenant = parsed.hostname.split('.')[0];                         // "arm"
+            const parts = parsed.pathname.split('/').filter(Boolean);       // ["careersection","arm_external","joblist.ftl"]
+            section = parts[1] || '';                                        // "arm_external"
+        } else {
+            tenant = token;
+            section = 'External';
+        }
+
+        if (!tenant) return [];
+
+        // Taleo public REST API ΓÇö no auth required for published jobs
+        const apiUrl = `https://${tenant}.taleo.net/careersection/rest/jobboard/requisition?lang=en&start=0&end=100${section ? `&src=${section}` : ''}`;
+        const r = await fetchWithTimeout(apiUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+        });
+        if (!r.ok) return [];
+        const d = await r.json();
+        const requisitions = d?.requisitionList || d?.requisitions || [];
+
+        return requisitions.map((j: any) => ({
+            title: j.title || j.jobTitle || '',
+            location: j.location || j.locationDescr || j.primaryLocation || '',
+            url: j.referenceNumber
+                ? `https://${tenant}.taleo.net/careersection/${section}/jobdetail.ftl?job=${j.referenceNumber}&lang=en`
+                : (j.jobDetailUrl || ''),
+            department: j.department || '',
+            salary: undefined,
+        })).filter((j: Job) => j.title && j.url);
+    } catch { return []; }
+}
+
+// ΓöÇΓöÇΓöÇ Eploy ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// Token is either a company slug ("vanquisbankinggroup") or a full careers URL.
+// Eploy exposes a public vacancy search JSON endpoint.
+async function fetchEploy(token: string): Promise<Job[]> {
+    try {
+        let base = '';
+
+        if (token.startsWith('http')) {
+            // Full URL ΓÇö extract the hostname-based eploy subdomain if present
+            const parsed = new URL(token);
+            if (parsed.hostname.includes('eploy.net')) {
+                base = `https://${parsed.hostname}`;
+            } else {
+                // Custom domain with Eploy backend ΓÇö try appending the known API path
+                base = `https://${parsed.hostname}`;
+            }
+        } else {
+            base = `https://${token}.eploy.net`;
+        }
+
+        // Primary: JSON vacancy search API
+        const apiUrl = `${base}/careers/vacancy/search/json?rows=200`;
+        const r = await fetchWithTimeout(apiUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+        });
+        if (!r.ok) return [];
+        const d = await r.json();
+        const vacancies = Array.isArray(d) ? d : (d.vacancies || d.results || []);
+
+        return vacancies.map((j: any) => ({
+            title: j.title || j.jobTitle || j.VacancyTitle || '',
+            location: j.location || j.Location || j.town || j.region || '',
+            url: j.url || j.applyUrl || `${base}/careers/vacancy/${j.id || j.VacancyId}`,
+            department: j.department || j.category || '',
+            salary: undefined,
+        })).filter((j: Job) => j.title && j.url);
+    } catch { return []; }
+}
+
+// --- Cornerstone ---
+async function fetchCornerstone(token: string): Promise<Job[]> {
+    try {
+        const homeUrl = `https://${token}.csod.com/ux/ats/careersite/1/home?c=${token}`;
+        const homeRes = await fetchWithTimeout(homeUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!homeRes.ok) return [];
+        const html = await homeRes.text();
+        
+        const tokenMatch = html.match(/csod\.context\.token\s*=\s*['"]([^'"]+)['"]/i) || html.match(/"token"\s*:\s*"([^"]+)"/i);
+        if (!tokenMatch) return [];
+        const jwt = tokenMatch[1];
+        
+        const hostMatch = html.match(/https?:\/\/[a-z0-9-]+\.api\.csod\.com/i);
+        const apiHost = hostMatch ? hostMatch[0] : 'https://na.api.csod.com';
+        
+        let allJobs: any[] = [];
+        let page = 1;
+        while (true) {
+            const reqUrl = `${apiHost}/rec-job-search/external/jobs`;
+            const payload = {
+                careerSiteId: 1, careerSitePageId: 1, pageNumber: page, pageSize: 100, cultureId: 1, cultureName: "en-US"
+            };
+            const reqRes = await fetchWithTimeout(reqUrl, {
+                method: 'POST',
+                headers: { 'User-Agent': 'Mozilla/5.0', 'Authorization': `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!reqRes.ok) break;
+            const data = await reqRes.json();
+            const reqs = data?.data?.requisitions || [];
+            if (!reqs.length) break;
+            
+            allJobs.push(...reqs);
+            if (data?.data?.totalCount && allJobs.length >= data.data.totalCount) break;
+            page++;
+        }
+        
+        return allJobs.map((j: any) => ({
+            title: j.displayJobTitle || 'Untitled',
+            url: `https://${token}.csod.com/ux/ats/careersite/1/job/${j.requisitionId}?c=${token}`,
+            location: Array.isArray(j.locations) ? j.locations.map((loc: any) => loc.city || loc.name || '').join(', ') : '',
+            department: j.department || j.category || '',
+            atsProvider: 'cornerstone'
+        })).filter(j => j.title && j.url);
+    } catch { return []; }
+}
+
+// --- Gem ---
+async function fetchGem(token: string): Promise<Job[]> {
+    try {
+        const payload = [{
+            operationName: "JobBoardList",
+            variables: { boardId: token },
+            query: "query JobBoardList($boardId: String!) { oatsExternalJobPostings(boardId: $boardId) { jobPostings { id extId title locations { name city isoCountry isRemote } job { department { name } } } } }"
+        }];
+        const res = await fetchWithTimeout('https://jobs.gem.com/api/public/graphql/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) return [];
+        const batch = await res.json();
+        if (!batch || !batch[0]) return [];
+        
+        const postings = batch[0]?.data?.oatsExternalJobPostings?.jobPostings || [];
+        return postings.map((j: any) => ({
+            title: j.title || '',
+            url: `https://jobs.gem.com/${token}/${j.extId || j.id}`,
+            location: Array.isArray(j.locations) && j.locations.length > 0 ? (j.locations[0].city || j.locations[0].name || '') : '',
+            department: j.job?.department?.name || '',
+            atsProvider: 'gem'
+        })).filter((j: any) => j.title && j.url);
+    } catch { return []; }
+}
+
+// --- Join.com ---
+async function fetchJoinCom(token: string): Promise<Job[]> {
+    try {
+        const homeRes = await fetchWithTimeout(`https://join.com/companies/${token}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!homeRes.ok) return [];
+        const html = await homeRes.text();
+        
+        const idMatch = html.match(/"company"\s*:\s*\{\s*"id"\s*:\s*"?(\d+)"?/i) || html.match(/"companyId"\s*:\s*"?(\d+)"?/i);
+        if (!idMatch) return [];
+        const companyId = idMatch[1];
+        
+        let allJobs: any[] = [];
+        let page = 1;
+        while (true) {
+            const apiRes = await fetchWithTimeout(`https://join.com/api/public/companies/${companyId}/jobs?locale=en-us&page=${page}&pageSize=100`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            if (!apiRes.ok) break;
+            const data = await apiRes.json();
+            const items = data.items || [];
+            if (!items.length) break;
+            
+            allJobs.push(...items);
+            if (page >= (data.pagination?.totalPages || page)) break;
+            page++;
+        }
+        
+        return allJobs.map((j: any) => ({
+            title: j.title || '',
+            url: j.url || `https://join.com/companies/${token}/jobs/${j.idParam || j.id}`,
+            location: j.location || (j.city ? `${j.city.cityName || j.city.city || ''}` : ''),
+            department: typeof j.department === 'string' ? j.department : (j.department?.name || ''),
+            atsProvider: 'join_com'
+        })).filter((j: any) => j.title && j.url);
+    } catch { return []; }
+}
+
+// --- Mercor ---
+async function fetchMercor(token: string): Promise<Job[]> {
+    try {
+        const res = await fetchWithTimeout('https://aws.api.mercor.com/work/listings-explore-page', {
+            headers: {
+                'Accept': 'application/json',
+                'Authorization': 'Bearer',
+                'Origin': 'https://work.mercor.com',
+                'Referer': 'https://work.mercor.com/',
+                'User-Agent': 'Mozilla/5.0'
+            }
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        const listings = data.listings || [];
+        
+        return listings.map((j: any) => {
+            const listingId = j.listingId || '';
+            const title = j.title || '';
+            const slugTitle = title.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[-\s]+/g, '-').replace(/^-+|-+$/g, '');
+            return {
+                title,
+                url: `https://work.mercor.com/jobs/${listingId}/${slugTitle}`,
+                location: j.location || '',
+                salary: (j.rateMin || j.rateMax) ? `$${j.rateMin || ''}-${j.rateMax || ''}/${j.payRateFrequency || ''}` : undefined,
+                atsProvider: 'mercor'
+            };
+        }).filter((j: any) => j.title && j.url);
+    } catch { return []; }
+}
+
+// --- Phenom ---
+async function fetchPhenom(token: string): Promise<Job[]> {
+    try {
+        const baseUrl = token.replace(/\/$/, '');
+        const locale = 'en_us';
+        const country = 'us';
+        const searchUrl = `${baseUrl}/${country}/en/search-results`;
+        
+        const initRes = await fetchWithTimeout(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!initRes.ok) return [];
+        const html = await initRes.text();
+        const csrfMatch = html.match(/"csrfToken"\s*:\s*"([^"]+)"/);
+        const csrf = csrfMatch ? csrfMatch[1] : '';
+        
+        let allJobs: any[] = [];
+        let from = 0;
+        
+        while (true) {
+            const payload = {
+                lang: locale, country: country, deviceType: "desktop", pageName: "search-results",
+                ddoKey: "refineSearch", from: from, size: 100, siteType: "external", global: true
+            };
+            const headers: any = { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' };
+            if (csrf) headers['x-csrf-token'] = csrf;
+            
+            const reqRes = await fetchWithTimeout(`${baseUrl}/widgets`, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(payload)
+            });
+            if (!reqRes.ok) break;
+            const data = await reqRes.json();
+            
+            const rs = data?.refineSearch || {};
+            const hits = rs?.data?.jobs || rs?.jobs || rs?.hits || data?.jobs || [];
+            if (!hits.length) break;
+            
+            allJobs.push(...hits);
+            const total = rs?.totalHits || rs?.data?.totalHits || rs?.hitsCount || 0;
+            from += hits.length;
+            if (!total || from >= total) break;
+        }
+        
+        return allJobs.map((j: any) => {
+            const atsId = j.jobId || j.id || '';
+            let url = j.jobUrl || j.url || `${baseUrl}/job/${atsId}`;
+            if (!url.startsWith('http')) {
+                url = `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+            }
+            return {
+                title: j.title || j.jobTitle || '',
+                url: url,
+                location: [j.city, j.state, j.country].filter(Boolean).join(', ') || j.location || '',
+                department: j.department || j.category || '',
+                atsProvider: 'phenom'
+            };
+        }).filter((j: any) => j.title && j.url);
+    } catch { return []; }
+}
+
+// --- Recruiterbox ---
+async function fetchRecruiterbox(token: string): Promise<Job[]> {
+    try {
+        let allJobs: any[] = [];
+        let offset = 0;
+        while (true) {
+            const res = await fetchWithTimeout(`https://jsapi.recruiterbox.com/v1/openings?client_name=${token}&offset=${offset}&limit=100`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            if (!res.ok) break;
+            const data = await res.json();
+            const objects = data.objects || [];
+            if (!objects.length) break;
+            
+            allJobs.push(...objects);
+            const total = data.meta?.total;
+            offset += objects.length;
+            if (total !== undefined && offset >= total) break;
+            if (total === undefined && objects.length < 100) break;
+        }
+        
+        return allJobs.map((j: any) => ({
+            title: j.title || '',
+            url: j.hosted_url || j.url || '',
+            location: j.location ? [j.location.city, j.location.state, j.location.country].filter(Boolean).join(', ') : '',
+            department: j.department || j.team || '',
+            atsProvider: 'recruiterbox'
+        })).filter((j: any) => j.title && j.url);
+    } catch { return []; }
+}
+
 export const FETCHERS: Record<string, (token: string) => Promise<Job[]>> = {
     greenhouse: fetchGreenhouse,
     ashby: fetchAshby,
@@ -2575,6 +2928,16 @@ export const FETCHERS: Record<string, (token: string) => Promise<Job[]>> = {
     icims: fetchICIMS,
     rippling: fetchRippling,
     generic_careers: fetchGenericCareersPage,
+    jazzhr: fetchJazzHR,
+    oracle_taleo: fetchOracleTaleo,
+    eploy: fetchEploy,
+    cornerstone: fetchCornerstone,
+    gem: fetchGem,
+    join_com: fetchJoinCom,
+    mercor: fetchMercor,
+    phenom: fetchPhenom,
+    recruiterbox: fetchRecruiterbox,
+
 
     // Special / Custom Scrapers
     amazon: fetchAmazon,
@@ -2766,7 +3129,7 @@ export async function syncAll() {
                 const adapter = Adapters[adapterKey];
 
                 const locationInput = adapter ? adapter(j) : { locations: [j.location ?? ''], isRemote: false, isTrustedSource: false };
-                if (isNHS || isUKJob(locationInput)) {
+                if (isNHS || isLikelyUKJob(j)) {
                     ukJobs.push(j);
                     if (j.needs_review) needsReviewCount++;
                 } else {
