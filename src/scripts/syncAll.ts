@@ -3114,7 +3114,7 @@ export async function syncAll() {
             result.fetched = allJobs.length;
 
             if (!allJobs.length) {
-                console.log(`[${displayProvider.padEnd(12)}] ${trading_name.padEnd(30)} ⚪ Fetch: 0 | UK: 0 | Saved: 0`);
+                console.log(`[${displayProvider.padEnd(12)}] ${trading_name.padEnd(30)} ⚪ Fetch: 0   | UK: 0   | Dups: 0   | Saved: 0   | Rej: 0   | Rev: 0`);
                 results.push(result);
                 continue;
             }
@@ -3215,7 +3215,7 @@ export async function syncAll() {
             }
 
             const statusEmoji = result.ukJobs > 0 ? '✅' : '⚪';
-            console.log(`[${displayProvider.padEnd(12)}] ${trading_name.padEnd(30)} ${statusEmoji} Fetch: ${result.fetched.toString().padEnd(3)} | UK: ${result.ukJobs.toString().padEnd(3)} | Saved: ${result.saved.toString().padEnd(3)} | Rej: ${result.rejected.toString().padEnd(3)} | Rev: ${result.needsReview}`);
+            console.log(`[${displayProvider.padEnd(12)}] ${trading_name.padEnd(30)} ${statusEmoji} Fetch: ${result.fetched.toString().padEnd(3)} | UK: ${result.ukJobs.toString().padEnd(3)} | Dups: ${(result.ukJobs - result.saved).toString().padEnd(3)} | Saved: ${result.saved.toString().padEnd(3)} | Rej: ${result.rejected.toString().padEnd(3)} | Rev: ${result.needsReview}`);
 
             results.push(result);
             await sleep(500); // Politeness delay
