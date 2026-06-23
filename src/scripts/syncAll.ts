@@ -231,22 +231,13 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
     return chunks;
 }
 
-function isUKLocation(loc: any): boolean {
-    if (!loc) return false;
-    const normalized = normalizeLocation(loc);
-    if (!normalized) return false;
-
-    // console.log(`      [isUKLocation] Normalized: "${normalized}"`);
-
+function isUKLocationInternal(normalized: string): boolean {
     // Hard block: bare "remote" with no explicit UK signal → not UK
-    // e.g. "Remote", "Anywhere", "Remote - Worldwide" all fail
     if (/^remote$/.test(normalized) || normalized === 'anywhere' || normalized === 'worldwide') {
         return false;
     }
 
     // Gap 5: Ireland Hybrid Roles
-    // Hard block: Irish locations (Republic of Ireland, NOT Northern Ireland)
-    // Only block if there is NO UK signal
     for (const irish of IRELAND_LOCATIONS) {
         if (normalized.includes(irish) && !normalized.includes('northern ireland')) {
             const hasUkSignal = UK_COUNTRIES.some(uk => normalized.includes(uk.toLowerCase())) ||
@@ -266,21 +257,17 @@ function isUKLocation(loc: any): boolean {
         "massachusetts", "california", "texas", "florida", "washington state"
     ];
     for (const blocked of blockList) {
-        // Special carve-out: "northern ireland" must not be blocked by "ireland"
         if (blocked === 'ireland' && normalized.includes('northern ireland')) continue;
         if (normalized.includes(blocked)) return false;
     }
 
-    // Hard block: US state/country 2-letter codes as isolated tokens
-    if (/\b(usa?|ny|nj|ca|tx|ma|il|wa|fl|ga|nc|va|pa|oh|mi|mn|co|az|or|nv|md|va|pa|oh|mi|mn|co|az|or|nv|vt|nh|me|ct|ri|ky|tn|nc|sc|ga|fl|al|ms|la|ar|ok|ks|ne|sd|nd|mt|wy|id|ut|nm)\b/.test(normalized)) {
-        // But allow "wa" only if surrounded by full UK context (e.g., "wa1" postcodes)
-        // Postcode pattern: letters+digits — if it looks like a UK postcode don't block
+    // Hard block: US state/country 2-letter codes
+    if (/\b(usa?|ny|nj|ca|tx|ma|il|wa|fl|ga|nc|va|pa|oh|mi|mn|co|az|or|nv|vt|nh|me|ct|ri|ky|tn|nc|sc|ga|fl|al|ms|la|ar|ok|ks|ne|sd|nd|mt|wy|id|ut|nm)\b/.test(normalized)) {
         if (!/\b[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2}\b/.test(normalized)) {
             return false;
         }
     }
 
-    // ✅ UK Remote — explicit UK remote signal
     if (normalized.includes('remote') && (
         normalized.includes('uk') || normalized.includes('united kingdom') ||
         normalized.includes('england') || normalized.includes('britain')
@@ -288,7 +275,6 @@ function isUKLocation(loc: any): boolean {
         return true;
     }
 
-    // ✅ Token-level match against known UK countries/nations/cities
     const tokens = normalized.split(/\s+/);
     for (const token of tokens) {
         if (UK_COUNTRIES.includes(token)) return true;
@@ -296,22 +282,38 @@ function isUKLocation(loc: any): boolean {
         if (UK_CITIES.includes(token)) return true;
     }
 
-    // ✅ Word-boundary match for England specifically
     if (/\bengland\b/.test(normalized)) return true;
-
-    // ✅ UK postcode pattern (e.g., "EC2V 8RF", "W1A 1AA", "SW1A 2AA")
     if (/\b[a-z]{1,2}\d[a-z\d]?\s?\d[a-z]{2}\b/.test(normalized)) return true;
 
-    // ✅ Multi-word phrase match for city names with spaces
-    const multiWordUK = [
-        ...UK_COUNTRIES, ...UK_NATIONS, ...UK_CITIES
-    ].filter(w => w.includes(' '));
+    const multiWordUK = [...UK_COUNTRIES, ...UK_NATIONS, ...UK_CITIES].filter(w => w.includes(' '));
     for (const phrase of multiWordUK) {
         if (normalized.includes(phrase)) return true;
     }
 
     return false;
 }
+
+function isUKLocation(loc: any): boolean {
+    if (!loc) return false;
+    const normalizedFull = normalizeLocation(loc);
+    if (!normalizedFull) return false;
+
+    // Evaluate whole string first
+    if (isUKLocationInternal(normalizedFull)) return true;
+
+    // Split multi-locations (e.g. "London | New York")
+    const subLocations = normalizedFull.split(/\||\/|;|\band\b|\bor\b|&/i).map(s => s.trim()).filter(Boolean);
+    for (const subLoc of subLocations) {
+        if (isUKLocationInternal(subLoc)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------
+// The following removes the old logic body
+
 
 function hasAnyHint(text: string, hints: string[]): boolean {
     return hints.some((hint) => text.includes(hint));
@@ -2777,7 +2779,7 @@ async function fetchJoinCom(token: string): Promise<Job[]> {
         return allJobs.map((j: any) => ({
             title: j.title || '',
             url: j.url || `https://join.com/companies/${token}/jobs/${j.idParam || j.id}`,
-            location: j.location || (j.city ? `${j.city.cityName || j.city.city || ''}` : ''),
+            location: [j.location, j.city?.cityName || j.city?.city, j.city?.regionName || j.office?.regionName, j.city?.countryName || j.country?.name || j.office?.countryName].filter(Boolean).join(', ') || '',
             department: typeof j.department === 'string' ? j.department : (j.department?.name || ''),
             atsProvider: 'join_com'
         })).filter((j: any) => j.title && j.url);
