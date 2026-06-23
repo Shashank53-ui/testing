@@ -17,12 +17,23 @@ The `syncAll.ts` script acts as the master orchestrator. Its workflow is:
 5. **Upsert:** Saves successfully filtered jobs back to Supabase.
 
 ### 2.1 Supported ATS Providers
-The script natively handles over a dozen ATS platforms using targeted API requests or lightweight Cheerio HTML parsing:
-- **Greenhouse, Lever, Ashby, Pinpoint, Workable:** Uses clean, structured JSON API endpoints.
-- **BambooHR, JazzHR, TeamTailor, Breezy, Recruitee:** Uses combination of JSON APIs or HTML scraping.
-- **Join.com, Personio, HiBob:** Specialized scrapers that unpack heavily nested API data (e.g., unpacking Join.com's `workplaceType` and `remoteType`).
+The script natively handles over 30 ATS platforms using targeted API requests or lightweight Cheerio HTML parsing.
 
-*Note: Huge corporate sites like Amazon, Google, and JPMC are handled by separate Playwright scripts due to extreme anti-bot protection and pagination.*
+**Core ATS Integrations:**
+Greenhouse, Lever, Ashby, Pinpoint, Workable, BambooHR, TeamTailor, Breezy, Recruitee, Jobvite, Avature, SmartRecruiters, Workday, SuccessFactors, Eightfold, iCIMS, Rippling.
+
+**Newly Added Scrapers (Recent Integration):**
+- **Join.com**: Specialized handling to unpack nested `workplaceType` and global `remoteType: "ANYWHERE"` variables.
+- **JazzHR**: Direct DOM scraping to bypass dynamic content and extract clean location strings.
+- **Oracle Taleo & Oracle Cloud**: Highly complex XML/JSON SOAP and REST endpoints.
+- **Phenom People**: Specialized extraction to navigate their heavily paginated career portals.
+- **Eploy**: Bespoke HTML scraping for the UK-centric Eploy ATS.
+- **Cornerstone**: Navigates Cornerstone's legacy career portal architectures.
+- **Recruiterbox / Trakstar**: Targeted API parsing for direct company job boards.
+- **Gem**: Extracts jobs from Gem's ATS career portals.
+- **Mercor**: Direct integration with Mercor's job boards.
+
+*Note: Huge corporate sites like Amazon, Google, Apple, Meta, and JPMC are handled by separate Playwright scripts due to extreme anti-bot protection and pagination.*
 
 ---
 
