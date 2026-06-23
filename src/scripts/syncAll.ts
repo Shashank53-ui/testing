@@ -189,6 +189,11 @@ const NON_UK_LOCATION_PHRASES = [
     "norway", "denmark", "finland", "switzerland", "austria", "belgium",
     "poland", "ukraine", "russia", "china", "japan", "south korea",
     "singapore", "hong kong", "united arab emirates", "dubai", "israel", "ireland", "eire",
+    "philippines", "brazil", "mexico", "south africa", "argentina", "colombia",
+    "vietnam", "thailand", "malaysia", "indonesia", "nigeria", "egypt", "kenya",
+    "pakistan", "bangladesh", "sri lanka", "turkey", "romania", "bulgaria",
+    "serbia", "greece", "cyprus", "malta", "latvia", "lithuania", "estonia", "czech republic",
+    "slovakia", "hungary", "croatia", "slovenia", "taiwan", "chile", "peru", "uruguay",
     // US cities
     "new york", "new jersey", "san francisco", "los angeles", "seattle", "chicago", "boston", "austin", "dallas", "houston", "denver", "atlanta",
     "miami", "phoenix", "las vegas", "san jose", "san diego", "whippany", "wilmington", "st louis", "new hampshire", "california", "texas", "virginia", "mclean", "richmond", "plano", "georgia", "illinois", "maryland", "pennsylvania", "north carolina",
@@ -275,17 +280,20 @@ function isUKLocationInternal(normalized: string): boolean {
         return true;
     }
 
-    const tokens = normalized.split(/\s+/);
+    const cleanLoc = normalized.replace(/[,;()\/|]/g, ' ').replace(/\s+/g, ' ');
+    const tokens = cleanLoc.split(/\s+/);
     for (const token of tokens) {
-        if (UK_COUNTRIES.includes(token)) return true;
-        if (UK_NATIONS.includes(token)) return true;
-        if (UK_CITIES.includes(token)) return true;
+        if (UK_COUNTRIES.map(c => c.toLowerCase()).includes(token)) return true;
+        if (UK_NATIONS.map(n => n.toLowerCase()).includes(token)) return true;
+        if (UK_CITIES.map(c => c.toLowerCase()).includes(token)) return true;
     }
 
     if (/\bengland\b/.test(normalized)) return true;
     if (/\b[a-z]{1,2}\d[a-z\d]?\s?\d[a-z]{2}\b/.test(normalized)) return true;
 
-    const multiWordUK = [...UK_COUNTRIES, ...UK_NATIONS, ...UK_CITIES].filter(w => w.includes(' '));
+    const multiWordUK = [...UK_COUNTRIES, ...UK_NATIONS, ...UK_CITIES]
+        .map(w => w.toLowerCase())
+        .filter(w => w.includes(' '));
     for (const phrase of multiWordUK) {
         if (normalized.includes(phrase)) return true;
     }
@@ -343,6 +351,13 @@ function isLikelyUKJob(job: Job): boolean {
         return false;
     }
 
+    // Hard block: title signals non-UK phrase
+    const badTitlePhrase = NON_UK_LOCATION_PHRASES.find((p) => titleNorm.includes(p));
+    if (badTitlePhrase && !titleNorm.includes('northern ireland')) {
+        job.rejection_reason = `non_uk_title: ${badTitlePhrase}`;
+        return false;
+    }
+
     if (job.verified) return true;
 
     // PRIMARY: location field is the strongest signal
@@ -350,18 +365,22 @@ function isLikelyUKJob(job: Job): boolean {
         const ukFromLoc = isUKLocation(locationNorm);
         if (ukFromLoc) return true;
 
-        // EXCEPTION: if location is just 'remote' but the URL is explicitly UK
-        // e.g. jobs.company.co.uk/remote-role
-        if (/^remote$/.test(locationNorm) && (
-            urlNorm.includes('.uk') ||
-            urlNorm.includes('.co.uk') ||
-            urlNorm.includes('country=gb') ||
-            urlNorm.includes('country=uk')
-        )) {
+        // --- THE USER'S EXACT STRICT REMOTE RULES ---
+        // 1. "if only remote is present as locaton nothing else is there other then remote in the place of location -> take it"
+        if (locationNorm === 'remote' || locationNorm === '(remote)') {
             return true;
         }
 
-        // Location is present but NOT UK — don't fall through to URL/title signals
+        // 2. "if remote + other location there not , seperated or any seperated for example remote (India)-> dont take it"
+        // At this point, we know it's NOT a UK location (ukFromLoc is false), and it's NOT strictly "remote".
+        // So if it contains the word "remote", it must be "remote + other non-UK location" (e.g. "remote india", "remote europe").
+        if (/\bremote\b/.test(locationNorm)) {
+            job.rejection_reason = `strict_remote_rule_rejected: ${locationNorm}`;
+            return false;
+        }
+        // ---------------------------------------------
+
+        // Location is present but NOT UK and NOT remote — don't fall through to URL/title signals
         // (avoids "Senior Engineer - New York" matching title-based UK city checks)
         // EXCEPTION: if location is truly ambiguous (e.g. 'remote', 'flexible')
         const isAmbiguous = /^(remote|flexible|hybrid|anywhere|worldwide|global|distributed|not specified|remote other|remot other|multiple locations)$/.test(locationNorm) ||
@@ -1339,17 +1358,25 @@ async function fetchBambooHR(token: string): Promise<Job[]> {
         const r = await fetchWithTimeout(`https://${token}.bamboohr.com/careers/list`);
         if (r.ok) {
             const d = await r.json();
-            return (d.result || []).map((j: any) => ({
-                title: j.jobOpeningName || '',
-                location: [
+            return (d.result || []).map((j: any) => {
+                const isRemote = j.isRemote === true || j.locationType === '1' || j.locationType === 'Remote';
+                const locPieces = [
                     j.location?.city,
                     j.location?.state,
                     j.location?.country
-                ].filter(Boolean).join(', '),
-                url: `https://${token}.bamboohr.com/careers/${j.id}`,
-                department: '',
-                salary: undefined
-            }));
+                ].filter(Boolean);
+                let locStr = locPieces.join(', ');
+                if (isRemote && !locStr) locStr = 'Remote';
+                else if (isRemote && locStr && !locStr.toLowerCase().includes('remote')) locStr += ' (Remote)';
+                
+                return {
+                    title: j.jobOpeningName || '',
+                    location: locStr,
+                    url: `https://${token}.bamboohr.com/careers/${j.id}`,
+                    department: '',
+                    salary: undefined
+                };
+            });
         }
         // Fallback: applicant tracking API
         const r2 = await fetchWithTimeout(
@@ -1358,13 +1385,20 @@ async function fetchBambooHR(token: string): Promise<Job[]> {
         );
         if (!r2.ok) return [];
         const d2 = await r2.json();
-        return (d2 || []).map((j: any) => ({
-            title: j.jobTitle?.label || j.title || '',
-            location: j.location?.label || '',
-            url: `https://${token}.bamboohr.com/jobs/${j.id}/`,
-            department: j.department?.label || '',
-            salary: undefined
-        }));
+        return (d2 || []).map((j: any) => {
+            const isRemote = j.locationType?.id === '2' || j.locationType?.label === 'Remote' || j.isRemote || String(j.locationType) === '1';
+            let locStr = j.location?.label || '';
+            if (isRemote && !locStr) locStr = 'Remote';
+            else if (isRemote && locStr && !locStr.toLowerCase().includes('remote')) locStr += ' (Remote)';
+            
+            return {
+                title: j.jobTitle?.label || j.title || '',
+                location: locStr,
+                url: `https://${token}.bamboohr.com/jobs/${j.id}/`,
+                department: j.department?.label || '',
+                salary: undefined
+            };
+        });
     } catch { return []; }
 }
 
@@ -2585,8 +2619,8 @@ async function fetchJazzHR(token: string): Promise<Job[]> {
             if (!title || !jobUrl) return;
 
             const listItems = $(el).find('ul.list-inline li');
-            // First li = location (has map-marker icon), second = department/type
-            const location = listItems.eq(0).text().replace(/^\s*\S+\s*/, '').trim(); // strip icon char
+            // First li = location (icon is an empty <i> tag so .text() is just the location)
+            const location = listItems.eq(0).text().trim();
             const department = listItems.eq(1).text().trim();
 
             jobs.push({ title, location, url: jobUrl, department, salary: undefined });
@@ -2770,19 +2804,30 @@ async function fetchJoinCom(token: string): Promise<Job[]> {
             const data = await apiRes.json();
             const items = data.items || [];
             if (!items.length) break;
+            console.log(JSON.stringify(items.slice(0, 2), null, 2));
             
             allJobs.push(...items);
             if (page >= (data.pagination?.totalPages || page)) break;
             page++;
         }
         
-        return allJobs.map((j: any) => ({
-            title: j.title || '',
-            url: j.url || `https://join.com/companies/${token}/jobs/${j.idParam || j.id}`,
-            location: [j.location, j.city?.cityName || j.city?.city, j.city?.regionName || j.office?.regionName, j.city?.countryName || j.country?.name || j.office?.countryName].filter(Boolean).join(', ') || '',
-            department: typeof j.department === 'string' ? j.department : (j.department?.name || ''),
-            atsProvider: 'join_com'
-        })).filter((j: any) => j.title && j.url);
+        return allJobs.map((j: any) => {
+            let locParts: string[] = [];
+            if (j.remoteType === 'ANYWHERE') {
+                locParts = ['Remote'];
+            } else {
+                locParts = [j.location, j.city?.cityName || j.city?.city, j.city?.regionName || j.office?.regionName, j.city?.countryName || j.country?.name || j.office?.countryName].filter(Boolean);
+                if (j.workplaceType === 'REMOTE') locParts.unshift('Remote');
+            }
+            
+            return {
+                title: j.title || '',
+                url: j.url || `https://join.com/companies/${token}/jobs/${j.idParam || j.id}`,
+                location: locParts.join(', ') || '',
+                department: typeof j.department === 'string' ? j.department : (j.department?.name || ''),
+                atsProvider: 'join_com'
+            };
+        }).filter((j: any) => j.title && j.url);
     } catch { return []; }
 }
 
@@ -3131,6 +3176,26 @@ export async function syncAll() {
                 const adapter = Adapters[adapterKey];
 
                 const locationInput = adapter ? adapter(j) : { locations: [j.location ?? ''], isRemote: false, isTrustedSource: false };
+
+                // Fix empty/generic remote locations based on job title
+                const titleLower = String(j.title || '').toLowerCase();
+                let locTrimmed = String(j.location || '').trim();
+                const locLower = locTrimmed.toLowerCase();
+                
+                if (!locTrimmed || locLower === 'remote' || locLower === '(remote)') {
+                    if (titleLower.includes('uk remote') || titleLower.includes('remote uk') || titleLower.includes('united kingdom remote') || titleLower.includes('remote united kingdom')) {
+                        j.location = 'UK Remote';
+                    } else if (titleLower.includes('us remote') || titleLower.includes('remote us') || titleLower.includes('usa remote') || titleLower.includes('remote usa')) {
+                        j.location = 'US Remote';
+                    } else if (titleLower.includes('india remote') || titleLower.includes('remote india')) {
+                        j.location = 'India Remote';
+                    } else if (titleLower.includes('remote')) {
+                        j.location = 'Remote';
+                    } else if (locationInput.isRemote) {
+                        j.location = 'Remote';
+                    }
+                }
+
                 if (isNHS || isLikelyUKJob(j)) {
                     ukJobs.push(j);
                     if (j.needs_review) needsReviewCount++;

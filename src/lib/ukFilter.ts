@@ -52,7 +52,10 @@ export function isUKJob(input: JobLocationInput): boolean {
     if (isRemote) return true;
 
     // Normalize locations once
-    const normalizedLocs = locations.map(l => l.toLowerCase().trim());
+    const normalizedLocs = locations.map(l => {
+        const cleanLoc = l.toLowerCase().replace(/[,;()\/|]/g, ' ').replace(/\s+/g, ' ');
+        return cleanLoc.trim();
+    });
 
     // 3. Trust the Signal (UK Geography)
     // Use word boundaries to prevent "New York" matching "York"
